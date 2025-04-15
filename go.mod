@@ -1,6 +1,7 @@
 module github.com/Salvionied/apollo
 
 go 1.23.6
+
 require (
 	github.com/SundaeSwap-finance/kugo v1.1.0
 	github.com/SundaeSwap-finance/ogmigo v0.9.0
@@ -36,5 +37,5 @@ require (
 	filippo.io/edwards25519 v1.1.0
 	github.com/maestro-org/go-sdk v1.2.1
 	github.com/x448/float16 v0.8.4 // indirect
-	golang.org/x/crypto v0.33.0
+	golang.org/x/crypto v0.35.0
 )
