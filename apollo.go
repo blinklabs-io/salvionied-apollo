@@ -54,7 +54,7 @@ type Apollo struct {
 	referenceInputs    []shelley.ShelleyTransactionInput
 	collateralReturn   *babbage.BabbageTransactionOutput
 	nativescripts      []common.NativeScript
-	usedUtxos          []string
+	usedUtxos          map[string]bool
 	wallet             Wallet
 	certificates       []common.CertificateWrapper
 	withdrawals        map[string]withdrawalEntry
@@ -799,7 +799,8 @@ func (a *Apollo) Clone() *Apollo {
 	clone.collaterals = append(clone.collaterals, a.collaterals...)
 	clone.referenceInputs = append(clone.referenceInputs, a.referenceInputs...)
 	clone.nativescripts = append(clone.nativescripts, a.nativescripts...)
-	clone.usedUtxos = append(clone.usedUtxos, a.usedUtxos...)
+	clone.usedUtxos = make(map[string]bool, len(a.usedUtxos))
+	maps.Copy(clone.usedUtxos, a.usedUtxos)
 	clone.certificates = append(clone.certificates, a.certificates...)
 	clone.scriptHashes = append(clone.scriptHashes, a.scriptHashes...)
 	maps.Copy(clone.redeemers, a.redeemers)
@@ -855,10 +856,10 @@ func (a *Apollo) UtxoFromRef(txHash string, txIndex int) (*common.Utxo, error) {
 }
 
 // GetUsedUTxOs returns a copy of the used UTxO references.
-func (a *Apollo) GetUsedUTxOs() []string {
-	result := make([]string, len(a.usedUtxos))
-	copy(result, a.usedUtxos)
-	return result
+func (a *Apollo) GetUsedUTxOs() map[string]bool {
+	cp := make(map[string]bool, len(a.usedUtxos))
+	maps.Copy(cp, a.usedUtxos)
+	return cp
 }
 
 // GetBurns returns the total minted/burned value.
@@ -1325,7 +1326,9 @@ func (a *Apollo) selectCoins(required, currentInput Value) ([]common.Utxo, error
 
 		if remaining.Coin == 0 && !remaining.HasAssets() {
 			// Commit to usedUtxos only on success
-			a.usedUtxos = append(a.usedUtxos, selectedRefs...)
+			for _, r := range selectedRefs {
+				a.markUsed(r)
+			}
 			return selected, nil
 		}
 	}
@@ -1334,7 +1337,9 @@ func (a *Apollo) selectCoins(required, currentInput Value) ([]common.Utxo, error
 		return nil, errors.New("insufficient UTxOs to cover required value")
 	}
 	// Commit to usedUtxos only on success
-	a.usedUtxos = append(a.usedUtxos, selectedRefs...)
+	for _, r := range selectedRefs {
+		a.markUsed(r)
+	}
 	return selected, nil
 }
 
@@ -1878,7 +1883,7 @@ func (a *Apollo) buildMintAsset() (*common.MultiAsset[common.MultiAssetTypeMint]
 }
 
 func (a *Apollo) isUsed(ref string) bool {
-	if slices.Contains(a.usedUtxos, ref) {
+	if a.usedUtxos[ref] {
 		return true
 	}
 	// Also check preselected
@@ -1893,6 +1898,14 @@ func (a *Apollo) isUsed(ref string) bool {
 		}
 	}
 	return false
+}
+
+// markUsed records a UTxO key as used, lazily initializing the map if needed.
+func (a *Apollo) markUsed(ref string) {
+	if a.usedUtxos == nil {
+		a.usedUtxos = make(map[string]bool)
+	}
+	a.usedUtxos[ref] = true
 }
 
 func utxoRef(utxo common.Utxo) string {
@@ -1942,11 +1955,17 @@ func (a *Apollo) setCollateral() error {
 		candidates = loaded
 	}
 
+	// First pass: prefer pure-lovelace UTxOs (no assets)
 	for _, utxo := range candidates {
-		if a.isUsed(utxoRef(utxo)) {
+		ref := utxoRef(utxo)
+		if a.isUsed(ref) {
 			continue
 		}
 		if utxo.Output.Assets() != nil {
+			continue
+		}
+		addr := utxo.Output.Address()
+		if addr.Type() != common.AddressTypeKeyKey && addr.Type() != common.AddressTypeKeyNone {
 			continue
 		}
 		amt := utxo.Output.Amount()
@@ -1954,18 +1973,57 @@ func (a *Apollo) setCollateral() error {
 			continue
 		}
 		lovelace := amt.Int64()
-		if lovelace >= minCollateral {
-			a.collaterals = append(a.collaterals, utxo)
-			a.totalCollateral = minCollateral
-			// Build collateral return for the remainder
-			remainder := lovelace - minCollateral
-			if remainder > 0 {
-				returnVal := Value{Coin: uint64(remainder)}
-				ret := NewBabbageOutput(a.getChangeAddress(), returnVal, nil, nil)
-				a.collateralReturn = &ret
-			}
-			return nil
+		if lovelace < minCollateral {
+			continue
 		}
+		a.collaterals = append(a.collaterals, utxo)
+		a.markUsed(ref)
+		a.totalCollateral = minCollateral
+		remainder := lovelace - minCollateral
+		if remainder > 0 {
+			returnVal := Value{Coin: uint64(remainder)}
+			ret := NewBabbageOutput(a.getChangeAddress(), returnVal, nil, nil)
+			a.collateralReturn = &ret
+		}
+		return nil
+	}
+	// Fallback: allow UTxOs with some assets
+	for _, utxo := range candidates {
+		ref := utxoRef(utxo)
+		if a.isUsed(ref) {
+			continue
+		}
+		addr := utxo.Output.Address()
+		if addr.Type() != common.AddressTypeKeyKey && addr.Type() != common.AddressTypeKeyNone {
+			continue
+		}
+		amt := utxo.Output.Amount()
+		if amt == nil || !amt.IsInt64() {
+			continue
+		}
+		lovelace := amt.Int64()
+		if lovelace < minCollateral {
+			continue
+		}
+		remainder := lovelace - minCollateral
+		assets := utxo.Output.Assets()
+		if remainder == 0 && assets != nil {
+			// We can't select an asset-bearing collateral UTxO unless we can
+			// produce a collateral return that carries those assets forward.
+			continue
+		}
+		a.collaterals = append(a.collaterals, utxo)
+		a.markUsed(ref)
+		a.totalCollateral = minCollateral
+		if remainder > 0 {
+			returnVal := Value{Coin: uint64(remainder)}
+			if assets != nil {
+				returnVal.Assets = CloneMultiAsset(assets)
+			}
+			ret := NewBabbageOutput(a.getChangeAddress(), returnVal, nil, nil)
+			a.collateralReturn = &ret
+		}
+		return nil
 	}
 	return errors.New("script transaction requires collateral, but no eligible collateral UTxO was found")
 }

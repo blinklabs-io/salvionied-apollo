@@ -69,6 +69,26 @@ func addTestUtxo(fc *fixed.FixedChainContext, addr common.Address, lovelace uint
 	fc.AddUtxo(addr, utxo)
 }
 
+func makeAssetTestUtxo(t *testing.T, txHash common.Blake2b256, index uint32, lovelace uint64, assets *common.MultiAsset[common.MultiAssetTypeOutput]) common.Utxo {
+	t.Helper()
+	addr := testAddress(t)
+	input := shelley.ShelleyTransactionInput{
+		TxId:        txHash,
+		OutputIndex: index,
+	}
+	output := babbage.BabbageTransactionOutput{
+		OutputAddress: addr,
+		OutputAmount: mary.MaryTransactionOutputValue{
+			Amount: lovelace,
+			Assets: assets,
+		},
+	}
+	return common.Utxo{
+		Id:     input,
+		Output: &output,
+	}
+}
+
 func TestNewApollo(t *testing.T) {
 	cc := setupFixedContext()
 	a := New(cc)
@@ -822,7 +842,7 @@ func TestUtxoFromRefInvalidHex(t *testing.T) {
 func TestGetUsedUTxOs(t *testing.T) {
 	cc := setupFixedContext()
 	a := New(cc)
-	a.usedUtxos = []string{"abc#0", "def#1"}
+	a.usedUtxos = map[string]bool{"abc#0": true, "def#1": true}
 
 	used := a.GetUsedUTxOs()
 	if len(used) != 2 {
@@ -1248,6 +1268,81 @@ func TestCompleteFailsWhenScriptTxHasNoEligibleCollateral(t *testing.T) {
 	_, err = a.Complete()
 	if err == nil {
 		t.Fatal("expected missing collateral error")
+	}
+}
+
+func TestSetCollateralSkipsExactMultiAssetCandidateWithoutMutatingState(t *testing.T) {
+	cc := setupFixedContext()
+	addr := testAddress(t)
+
+	var skippedHash, selectedHash common.Blake2b256
+	skippedHash[0] = 0x11
+	selectedHash[0] = 0x22
+
+	skipped := makeAssetTestUtxo(t, skippedHash, 0, 5_000_000, testMultiAsset(1, "skip", 1))
+	selected := makeAssetTestUtxo(t, selectedHash, 0, 6_000_000, testMultiAsset(2, "pick", 2))
+
+	a := New(cc).
+		SetWallet(NewExternalWallet(addr)).
+		SetCollateralAmount(5_000_000).
+		AttachScript(common.PlutusV2Script([]byte{0x01, 0x02})).
+		AddLoadedUTxOs(skipped, selected)
+
+	if err := a.setCollateral(); err != nil {
+		t.Fatalf("setCollateral failed: %v", err)
+	}
+	if len(a.collaterals) != 1 {
+		t.Fatalf("expected 1 collateral, got %d", len(a.collaterals))
+	}
+	if got := utxoRef(a.collaterals[0]); got != utxoRef(selected) {
+		t.Fatalf("selected wrong collateral: got %s want %s", got, utxoRef(selected))
+	}
+	if a.isUsed(utxoRef(skipped)) {
+		t.Fatalf("rejected collateral candidate %s was left marked as used", utxoRef(skipped))
+	}
+	if !a.isUsed(utxoRef(selected)) {
+		t.Fatalf("selected collateral %s was not marked as used", utxoRef(selected))
+	}
+	if a.totalCollateral != 5_000_000 {
+		t.Fatalf("expected total collateral 5000000, got %d", a.totalCollateral)
+	}
+	if a.collateralReturn == nil {
+		t.Fatal("expected collateral return for selected multi-asset collateral")
+	}
+	if amount := a.collateralReturn.Amount(); amount == nil || amount.Cmp(big.NewInt(1_000_000)) != 0 {
+		t.Fatalf("unexpected collateral return amount: %v", amount)
+	}
+}
+
+func TestSetCollateralRejectedExactMultiAssetCandidateLeavesBuilderCleanOnError(t *testing.T) {
+	cc := setupFixedContext()
+	addr := testAddress(t)
+
+	var skippedHash common.Blake2b256
+	skippedHash[0] = 0x33
+	skipped := makeAssetTestUtxo(t, skippedHash, 0, 5_000_000, testMultiAsset(1, "skip", 1))
+
+	a := New(cc).
+		SetWallet(NewExternalWallet(addr)).
+		SetCollateralAmount(5_000_000).
+		AttachScript(common.PlutusV2Script([]byte{0x01, 0x02})).
+		AddLoadedUTxOs(skipped)
+
+	err := a.setCollateral()
+	if err == nil {
+		t.Fatal("expected collateral selection error")
+	}
+	if len(a.collaterals) != 0 {
+		t.Fatalf("expected no collateral to be recorded, got %d", len(a.collaterals))
+	}
+	if a.isUsed(utxoRef(skipped)) {
+		t.Fatalf("rejected collateral candidate %s was left marked as used", utxoRef(skipped))
+	}
+	if a.totalCollateral != 0 {
+		t.Fatalf("expected total collateral to stay at 0, got %d", a.totalCollateral)
+	}
+	if a.collateralReturn != nil {
+		t.Fatal("expected no collateral return to be recorded")
 	}
 }
 
