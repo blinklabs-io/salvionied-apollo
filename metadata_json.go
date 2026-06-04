@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"sort"
 	"strings"
 )
 
@@ -112,7 +113,13 @@ func parseNoSchemaMetadataValue(value any, path string) (any, error) {
 		return items, nil
 	case map[string]any:
 		entries := make(MetadataMap, 0, len(v))
-		for key, item := range v {
+		keys := make([]string, 0, len(v))
+		for key := range v {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			item := v[key]
 			parsedKey, err := parseNoSchemaMapKey(key, fmt.Sprintf("%s key %q", path, key))
 			if err != nil {
 				return nil, err
@@ -255,11 +262,7 @@ func parseNoSchemaBytes(value string, path string) ([]byte, bool, error) {
 		return nil, false, nil
 	}
 	hexValue := value[2:]
-	for _, ch := range hexValue {
-		if ch >= 'A' && ch <= 'F' {
-			return nil, false, nil
-		}
-	}
+	// hex.DecodeString is case-insensitive, so uppercase A-F is accepted.
 	decoded, err := hex.DecodeString(hexValue)
 	if err != nil {
 		return nil, false, nil

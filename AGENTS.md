@@ -72,9 +72,9 @@ golangci-lint run
 **Wallet** (`wallet.go`):
 
 - `Address()`
-- `PaymentKeyHash()`
-- `StakeKeyHash()`
 - `SignTxBody(txHash)`
+- `PubKeyHash()`
+- `StakePubKeyHash()`
 
 ## Coding Standards
 

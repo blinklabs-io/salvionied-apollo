@@ -1,6 +1,7 @@
 package apollo
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -210,6 +211,26 @@ func TestRegisterDRepNoAnchor(t *testing.T) {
 	}
 }
 
+func TestRegisterDRepNegativeCoinSetsError(t *testing.T) {
+	a := newGovernanceTestApollo(t)
+	cred := testCredential(0xdd)
+
+	ret := a.RegisterDRep(cred, -1, nil)
+
+	if ret != a {
+		t.Fatal("RegisterDRep should return the same Apollo builder")
+	}
+	if a.err == nil {
+		t.Fatal("expected builder error")
+	}
+	if got := a.err.Error(); got != "RegisterDRep: coin must be non-negative" {
+		t.Fatalf("error = %q", got)
+	}
+	if len(a.certificates) != 0 {
+		t.Fatalf("expected no certificates, got %d", len(a.certificates))
+	}
+}
+
 func TestRetireDRep(t *testing.T) {
 	a := newGovernanceTestApollo(t)
 	cred := testCredential(0xaa)
@@ -218,6 +239,26 @@ func TestRetireDRep(t *testing.T) {
 	cert := requireCertificate[*common.DeregistrationDrepCertificate](t, a, common.CertificateTypeDeregistrationDrep)
 	if cert.DrepCredential.Credential != cred.Credential {
 		t.Fatal("drep credential hash mismatch")
+	}
+}
+
+func TestRetireDRepNegativeCoinSetsError(t *testing.T) {
+	a := newGovernanceTestApollo(t)
+	cred := testCredential(0xaa)
+
+	ret := a.RetireDRep(cred, -1)
+
+	if ret != a {
+		t.Fatal("RetireDRep should return the same Apollo builder")
+	}
+	if a.err == nil {
+		t.Fatal("expected builder error")
+	}
+	if got := a.err.Error(); got != "RetireDRep: coin must be non-negative" {
+		t.Fatalf("error = %q", got)
+	}
+	if len(a.certificates) != 0 {
+		t.Fatalf("expected no certificates, got %d", len(a.certificates))
 	}
 }
 
@@ -232,6 +273,20 @@ func TestUpdateDRep(t *testing.T) {
 	}
 	if cert.Anchor == nil {
 		t.Fatal("expected anchor")
+	}
+}
+
+func TestUpdateDRepNoAnchor(t *testing.T) {
+	a := newGovernanceTestApollo(t)
+	cred := testCredential(0xbc)
+	a.UpdateDRep(cred, nil)
+
+	cert := requireCertificate[*common.UpdateDrepCertificate](t, a, common.CertificateTypeUpdateDrep)
+	if cert.DrepCredential.Credential != cred.Credential {
+		t.Fatal("drep credential hash mismatch")
+	}
+	if cert.Anchor != nil {
+		t.Fatal("expected nil anchor")
 	}
 }
 
@@ -276,6 +331,62 @@ func TestResignCommitteeColdKeyNoAnchor(t *testing.T) {
 	if cert.Anchor != nil {
 		t.Fatal("expected nil anchor")
 	}
+}
+
+func TestSetShelleyMetadataFromJSONInvalidDoesNotMutate(t *testing.T) {
+	a := New(nil)
+	originalMetadata := map[uint64]any{1: "keep"}
+	a.SetShelleyMetadata(originalMetadata)
+	originalAuxData := auxDataSnapshot(t, a.auxiliaryData)
+
+	ret, err := a.SetShelleyMetadataFromJSON([]byte("{"))
+
+	if ret != a {
+		t.Fatal("SetShelleyMetadataFromJSON should return the same Apollo builder")
+	}
+	if err == nil {
+		t.Fatal("expected invalid JSON error")
+	}
+	if got := err.Error(); got != "decode metadata JSON: unexpected EOF" {
+		t.Fatalf("error = %q", got)
+	}
+	if got := auxDataSnapshot(t, a.auxiliaryData); got != originalAuxData {
+		t.Fatalf("auxiliaryData should not be mutated on error, got %s want %s", got, originalAuxData)
+	}
+}
+
+func TestSetShelleyMetadataFromJSONWithInvalidSchemaDoesNotMutate(t *testing.T) {
+	a := New(nil)
+	originalMetadata := map[uint64]any{1: "keep"}
+	a.SetShelleyMetadata(originalMetadata)
+	originalAuxData := auxDataSnapshot(t, a.auxiliaryData)
+
+	ret, err := a.SetShelleyMetadataFromJSONWithSchema([]byte(`{"1":1}`), MetadataJSONSchema(99))
+
+	if ret != a {
+		t.Fatal("SetShelleyMetadataFromJSONWithSchema should return the same Apollo builder")
+	}
+	if err == nil {
+		t.Fatal("expected unsupported schema error")
+	}
+	if got := err.Error(); got != "unsupported metadata JSON schema 99" {
+		t.Fatalf("error = %q", got)
+	}
+	if got := auxDataSnapshot(t, a.auxiliaryData); got != originalAuxData {
+		t.Fatalf("auxiliaryData should not be mutated on error, got %s want %s", got, originalAuxData)
+	}
+}
+
+func auxDataSnapshot(t *testing.T, data *auxData) string {
+	t.Helper()
+	if data == nil {
+		return "null"
+	}
+	snapshot, err := json.Marshal(data.metadata)
+	if err != nil {
+		t.Fatalf("marshal auxiliaryData metadata: %v", err)
+	}
+	return string(snapshot)
 }
 
 func testCredential(first byte) common.Credential {

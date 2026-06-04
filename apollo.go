@@ -827,6 +827,10 @@ func (a *Apollo) AddVote(voter common.Voter, actionId common.GovActionId, proced
 		a.votingProcedures[voterKey] = make(map[*common.GovActionId]common.VotingProcedure)
 	}
 	actionVotes := a.votingProcedures[voterKey]
+	if actionVotes == nil {
+		actionVotes = make(map[*common.GovActionId]common.VotingProcedure)
+		a.votingProcedures[voterKey] = actionVotes
+	}
 	actionKey := findVotingProcedureAction(actionVotes, actionId)
 	if actionKey == nil {
 		actionCopy := actionId
