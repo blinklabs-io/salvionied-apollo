@@ -639,7 +639,7 @@ func (a *Apollo) RegisterPool(params common.PoolRegistrationCertificate) *Apollo
 // RegisterDRep adds a DRep registration certificate.
 func (a *Apollo) RegisterDRep(cred common.Credential, coin int64, anchor *common.GovAnchor) *Apollo {
 	if coin < 0 {
-		a.setErrOnce(fmt.Errorf("RegisterDRep: coin must be non-negative"))
+		a.setErrOnce(errors.New("RegisterDRep: coin must be non-negative"))
 		return a
 	}
 	cert := common.RegistrationDrepCertificate{
@@ -658,7 +658,7 @@ func (a *Apollo) RegisterDRep(cred common.Credential, coin int64, anchor *common
 // RetireDRep adds a DRep deregistration certificate.
 func (a *Apollo) RetireDRep(cred common.Credential, coin int64) *Apollo {
 	if coin < 0 {
-		a.setErrOnce(fmt.Errorf("RetireDRep: coin must be non-negative"))
+		a.setErrOnce(errors.New("RetireDRep: coin must be non-negative"))
 		return a
 	}
 	cert := common.DeregistrationDrepCertificate{
@@ -793,7 +793,7 @@ func (a *Apollo) SetShelleyMetadataFromJSONWithSchema(jsonData []byte, schema Me
 // SetCurrentTreasuryValue sets the Conway current treasury value field.
 func (a *Apollo) SetCurrentTreasuryValue(value int64) *Apollo {
 	if value < 0 {
-		a.setErrOnce(fmt.Errorf("SetCurrentTreasuryValue: value must be non-negative"))
+		a.setErrOnce(errors.New("SetCurrentTreasuryValue: value must be non-negative"))
 		return a
 	}
 	a.currentTreasury = value
@@ -803,11 +803,11 @@ func (a *Apollo) SetCurrentTreasuryValue(value int64) *Apollo {
 // AddTreasuryDonation adds to the Conway treasury donation amount.
 func (a *Apollo) AddTreasuryDonation(amount int64) *Apollo {
 	if amount < 0 {
-		a.setErrOnce(fmt.Errorf("AddTreasuryDonation: amount must be non-negative"))
+		a.setErrOnce(errors.New("AddTreasuryDonation: amount must be non-negative"))
 		return a
 	}
 	if math.MaxInt64-a.treasuryDonation < amount {
-		a.setErrOnce(fmt.Errorf("AddTreasuryDonation: donation amount overflow"))
+		a.setErrOnce(errors.New("AddTreasuryDonation: donation amount overflow"))
 		return a
 	}
 	a.treasuryDonation += amount
