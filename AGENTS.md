@@ -12,7 +12,7 @@ Blink Labs packages directly for core ledger behavior:
 - `github.com/blinklabs-io/bursa` for HD wallet key derivation
 - `github.com/blinklabs-io/plutigo` for Plutus data encoding/decoding
 
-Module path: `github.com/Salvionied/apollo/v2`
+Module path: `github.com/blinklabs-io/apollo/v2`
 
 ## Build and Test Commands
 

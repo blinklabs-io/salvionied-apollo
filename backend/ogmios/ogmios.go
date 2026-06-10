@@ -21,7 +21,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/mary"
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 
-	"github.com/Salvionied/apollo/v2/backend"
+	"github.com/blinklabs-io/apollo/v2/backend"
 )
 
 // OgmiosChainContext implements backend.ChainContext using Ogmios + Kupo.

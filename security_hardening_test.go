@@ -13,7 +13,7 @@ import (
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 
-	"github.com/Salvionied/apollo/v2/backend/fixed"
+	"github.com/blinklabs-io/apollo/v2/backend/fixed"
 )
 
 func TestBufferExUnits(t *testing.T) {

@@ -1,4 +1,4 @@
-module github.com/Salvionied/apollo/v2
+module github.com/blinklabs-io/apollo/v2
 
 go 1.25.10
 

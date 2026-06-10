@@ -18,8 +18,8 @@ import (
 	"github.com/blinklabs-io/gouroboros/ledger/shelley"
 	plutigoData "github.com/blinklabs-io/plutigo/data"
 
-	"github.com/Salvionied/apollo/v2/backend"
-	"github.com/Salvionied/apollo/v2/backend/fixed"
+	"github.com/blinklabs-io/apollo/v2/backend"
+	"github.com/blinklabs-io/apollo/v2/backend/fixed"
 )
 
 // validTestAddrBech32 is a valid bech32 test address with both payment and staking parts.

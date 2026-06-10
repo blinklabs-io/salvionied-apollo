@@ -96,7 +96,7 @@ func (a *Apollo) RegisterAndDelegateStakeAndVoteFromBech32(bech32 string, poolHa
 ```go
 import (
     "github.com/blinklabs-io/gouroboros/ledger/common"
-    apollo "github.com/Salvionied/apollo/v2"
+    apollo "github.com/blinklabs-io/apollo/v2"
 )
 
 a := apollo.New(cc)

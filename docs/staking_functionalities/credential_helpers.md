@@ -47,7 +47,7 @@ Extracts the staking credential from an address's `StakingPayload()`. Supports b
 ```go
 import (
     "github.com/blinklabs-io/gouroboros/ledger/common"
-    apollo "github.com/Salvionied/apollo/v2"
+    apollo "github.com/blinklabs-io/apollo/v2"
 )
 
 cred, err := a.GetStakeCredentialFromWallet()

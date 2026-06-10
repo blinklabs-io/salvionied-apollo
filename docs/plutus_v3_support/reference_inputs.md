@@ -19,9 +19,9 @@ func (a *Apollo) AddReferenceInput(txHash string, index int) (*Apollo, error)
 
 ```go
 import (
-    apollo "github.com/Salvionied/apollo/v2"
-    "github.com/Salvionied/apollo/v2/backend/blockfrost"
-    "github.com/Salvionied/apollo/v2/constants"
+    apollo "github.com/blinklabs-io/apollo/v2"
+    "github.com/blinklabs-io/apollo/v2/backend/blockfrost"
+    "github.com/blinklabs-io/apollo/v2/constants"
 )
 
 func main() {

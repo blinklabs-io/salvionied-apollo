@@ -23,7 +23,7 @@ import (
 	"github.com/maestro-org/go-sdk/models"
 	"github.com/maestro-org/go-sdk/utils"
 
-	"github.com/Salvionied/apollo/v2/backend"
+	"github.com/blinklabs-io/apollo/v2/backend"
 )
 
 // MaestroChainContext implements backend.ChainContext using the Maestro API.

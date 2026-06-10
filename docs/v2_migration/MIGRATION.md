@@ -9,7 +9,7 @@ Apollo v2 replaces all custom serialization code with [gouroboros](https://githu
 import "github.com/Salvionied/apollo"
 
 // v2
-import "github.com/Salvionied/apollo/v2"
+import "github.com/blinklabs-io/apollo/v2"
 ```
 
 ## Quick Reference: Method Changes
@@ -302,7 +302,7 @@ The `ChainContext` interface is now in `backend` package with gouroboros types:
 import "github.com/Salvionied/apollo/txBuilding/Backend/Base"
 
 // v2
-import "github.com/Salvionied/apollo/v2/backend"
+import "github.com/blinklabs-io/apollo/v2/backend"
 ```
 
 Supported backends: `blockfrost`, `ogmios`, `maestro`, `utxorpc`, `fixed` (testing).

@@ -2,7 +2,7 @@
 
 This guide covers the changes needed when switching from
 `github.com/SundaeSwap-finance/apollo` back to
-`github.com/Salvionied/apollo/v2`.
+`github.com/blinklabs-io/apollo/v2`.
 
 Both codebases share the same lineage. The upstream master has incorporated
 most of the SundaeSwap fork's improvements (error returns, PlutusV3, cost
@@ -21,15 +21,15 @@ import "github.com/SundaeSwap-finance/apollo"
 import "github.com/SundaeSwap-finance/apollo/serialization/PlutusData"
 
 // After (upstream)
-import "github.com/Salvionied/apollo/v2"
-import "github.com/Salvionied/apollo/v2/serialization/PlutusData"
+import "github.com/blinklabs-io/apollo/v2"
+import "github.com/blinklabs-io/apollo/v2/serialization/PlutusData"
 ```
 
 A global find-and-replace handles this:
 
 ```bash
 find . -name '*.go' -exec sed -i \
-  's|github.com/SundaeSwap-finance/apollo|github.com/Salvionied/apollo/v2|g' {} +
+  's|github.com/SundaeSwap-finance/apollo|github.com/blinklabs-io/apollo/v2|g' {} +
 go mod tidy
 ```
 
@@ -263,7 +263,7 @@ Run `go mod tidy` after switching imports.
 ## 6. Migration Checklist
 
 1. **Find-and-replace** all `github.com/SundaeSwap-finance/apollo`
-   imports to `github.com/Salvionied/apollo/v2`
+   imports to `github.com/blinklabs-io/apollo/v2`
 2. **Split** `AddReferenceScriptV1/V2/V3(txHash, index)` calls into
    `AddReferenceInput(txHash, index).AddReferenceScriptV1/V2/V3()`
 3. **Update** `UtxoFromRef` / `GetUtxoFromRef` callers to expect

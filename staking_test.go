@@ -5,7 +5,7 @@ import (
 
 	"github.com/blinklabs-io/gouroboros/ledger/common"
 
-	"github.com/Salvionied/apollo/v2/backend/fixed"
+	"github.com/blinklabs-io/apollo/v2/backend/fixed"
 )
 
 func TestRegisterStake(t *testing.T) {

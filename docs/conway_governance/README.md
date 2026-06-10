@@ -55,7 +55,7 @@ A single transaction can combine multiple governance operations. The example bel
 
 ```go
 import (
-    apollo "github.com/Salvionied/apollo/v2"
+    apollo "github.com/blinklabs-io/apollo/v2"
     "github.com/blinklabs-io/gouroboros/ledger/common"
     "github.com/blinklabs-io/gouroboros/ledger/conway"
 )

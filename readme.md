@@ -24,8 +24,8 @@ import (
 
     "github.com/blinklabs-io/gouroboros/ledger/common"
 
-    apollo "github.com/Salvionied/apollo/v2"
-    "github.com/Salvionied/apollo/v2/backend/blockfrost"
+    apollo "github.com/blinklabs-io/apollo/v2"
+    "github.com/blinklabs-io/apollo/v2/backend/blockfrost"
 )
 
 func main() {

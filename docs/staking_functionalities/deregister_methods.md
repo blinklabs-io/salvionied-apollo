@@ -43,7 +43,7 @@ Type-safe convenience methods that delegate to `DeregisterStake`.
 ```go
 import (
     "github.com/blinklabs-io/gouroboros/ledger/common"
-    apollo "github.com/Salvionied/apollo/v2"
+    apollo "github.com/blinklabs-io/apollo/v2"
 )
 
 a := apollo.New(cc)

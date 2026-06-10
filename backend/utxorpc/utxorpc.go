@@ -19,7 +19,7 @@ import (
 	syncpb "github.com/utxorpc/go-codegen/utxorpc/v1alpha/sync"
 	sdk "github.com/utxorpc/go-sdk"
 
-	"github.com/Salvionied/apollo/v2/backend"
+	"github.com/blinklabs-io/apollo/v2/backend"
 )
 
 // UtxoRpcChainContext implements backend.ChainContext using the UTxO RPC protocol.

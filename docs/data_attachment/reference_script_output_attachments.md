@@ -72,7 +72,7 @@ import (
     "log"
 
     "github.com/blinklabs-io/gouroboros/ledger/common"
-    apollo "github.com/Salvionied/apollo/v2"
+    apollo "github.com/blinklabs-io/apollo/v2"
 )
 
 scriptHex := "5901ec01000032323232323232323232322........855d11"
