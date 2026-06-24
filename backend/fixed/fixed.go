@@ -1,6 +1,7 @@
 package fixed
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"strconv"
@@ -82,7 +83,10 @@ func utxoRefKey(txHash common.Blake2b256, index uint32) string {
 	return hex.EncodeToString(txHash.Bytes()) + "#" + strconv.Itoa(int(index))
 }
 
-func (f *FixedChainContext) ProtocolParams() (backend.ProtocolParameters, error) {
+func (f *FixedChainContext) ProtocolParams(ctx context.Context) (backend.ProtocolParameters, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return backend.ProtocolParameters{}, err
+	}
 	pp := f.protocolParams
 	if pp.CostModels != nil {
 		cm := make(map[string][]int64, len(pp.CostModels))
@@ -96,7 +100,10 @@ func (f *FixedChainContext) ProtocolParams() (backend.ProtocolParameters, error)
 	return pp, nil
 }
 
-func (f *FixedChainContext) GenesisParams() (backend.GenesisParameters, error) {
+func (f *FixedChainContext) GenesisParams(ctx context.Context) (backend.GenesisParameters, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return backend.GenesisParameters{}, err
+	}
 	return f.genesisParams, nil
 }
 
@@ -104,23 +111,33 @@ func (f *FixedChainContext) NetworkId() uint8 {
 	return f.networkId
 }
 
-func (f *FixedChainContext) CurrentEpoch() (uint64, error) {
+func (f *FixedChainContext) CurrentEpoch(ctx context.Context) (uint64, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return 0, err
+	}
 	return 0, nil
 }
 
-func (f *FixedChainContext) MaxTxFee() (uint64, error) {
-	pp, err := f.ProtocolParams()
+func (f *FixedChainContext) MaxTxFee(ctx context.Context) (uint64, error) {
+	ctx = backend.ContextOrBackground(ctx)
+	pp, err := f.ProtocolParams(ctx)
 	if err != nil {
 		return 0, err
 	}
 	return backend.ComputeMaxTxFee(pp)
 }
 
-func (f *FixedChainContext) Tip() (uint64, error) {
+func (f *FixedChainContext) Tip(ctx context.Context) (uint64, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return 0, err
+	}
 	return 0, nil
 }
 
-func (f *FixedChainContext) Utxos(address common.Address) ([]common.Utxo, error) {
+func (f *FixedChainContext) Utxos(ctx context.Context, address common.Address) ([]common.Utxo, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return nil, err
+	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	src := f.utxos[address.String()]
@@ -129,15 +146,24 @@ func (f *FixedChainContext) Utxos(address common.Address) ([]common.Utxo, error)
 	return result, nil
 }
 
-func (f *FixedChainContext) SubmitTx(_ []byte) (common.Blake2b256, error) {
+func (f *FixedChainContext) SubmitTx(ctx context.Context, _ []byte) (common.Blake2b256, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return common.Blake2b256{}, err
+	}
 	return common.Blake2b256{}, errors.New("cannot submit tx with fixed chain context")
 }
 
-func (f *FixedChainContext) EvaluateTx(_ []byte, _ []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error) {
+func (f *FixedChainContext) EvaluateTx(ctx context.Context, _ []byte, _ []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return nil, err
+	}
 	return nil, errors.New("cannot evaluate tx with fixed chain context")
 }
 
-func (f *FixedChainContext) UtxoByRef(txHash common.Blake2b256, index uint32) (*common.Utxo, error) {
+func (f *FixedChainContext) UtxoByRef(ctx context.Context, txHash common.Blake2b256, index uint32) (*common.Utxo, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return nil, err
+	}
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	if utxo, ok := f.utxosByRef[utxoRefKey(txHash, index)]; ok {
@@ -147,6 +173,9 @@ func (f *FixedChainContext) UtxoByRef(txHash common.Blake2b256, index uint32) (*
 	return nil, errors.New("utxo not found in fixed chain context")
 }
 
-func (f *FixedChainContext) ScriptCbor(_ common.Blake2b224) ([]byte, error) {
+func (f *FixedChainContext) ScriptCbor(ctx context.Context, _ common.Blake2b224) ([]byte, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return nil, err
+	}
 	return nil, errors.New("not implemented in fixed chain context")
 }

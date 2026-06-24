@@ -2,6 +2,7 @@ package apollo
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -1033,6 +1034,12 @@ func (a *Apollo) Clone() *Apollo {
 
 // UtxoFromRef looks up a UTxO by transaction hash and index.
 func (a *Apollo) UtxoFromRef(txHash string, txIndex int) (*common.Utxo, error) {
+	return a.UtxoFromRefContext(context.Background(), txHash, txIndex)
+}
+
+// UtxoFromRefContext looks up a UTxO by transaction hash and index.
+func (a *Apollo) UtxoFromRefContext(ctx context.Context, txHash string, txIndex int) (*common.Utxo, error) {
+	ctx = backend.ContextOrBackground(ctx)
 	hashBytes, err := hex.DecodeString(txHash)
 	if err != nil {
 		return nil, fmt.Errorf("invalid tx hash hex: %w", err)
@@ -1045,7 +1052,7 @@ func (a *Apollo) UtxoFromRef(txHash string, txIndex int) (*common.Utxo, error) {
 	}
 	var hash common.Blake2b256
 	copy(hash[:], hashBytes)
-	return a.Context.UtxoByRef(hash, uint32(txIndex))
+	return a.Context.UtxoByRef(ctx, hash, uint32(txIndex))
 }
 
 // GetUsedUTxOs returns a copy of the used UTxO references.
@@ -1067,6 +1074,12 @@ func (a *Apollo) GetWallet() Wallet {
 
 // Complete performs coin selection, fee estimation, and builds the transaction.
 func (a *Apollo) Complete() (*Apollo, error) {
+	return a.CompleteContext(context.Background())
+}
+
+// CompleteContext performs coin selection, fee estimation, and builds the transaction.
+func (a *Apollo) CompleteContext(ctx context.Context) (*Apollo, error) {
+	ctx = backend.ContextOrBackground(ctx)
 	if a.err != nil {
 		return a, a.err
 	}
@@ -1078,17 +1091,17 @@ func (a *Apollo) Complete() (*Apollo, error) {
 	}
 
 	// Load UTxOs from input addresses if needed (must happen before collateral selection)
-	if err := a.loadUtxos(); err != nil {
+	if err := a.loadUtxos(ctx); err != nil {
 		return a, err
 	}
 
 	// Auto-select collateral if needed (after UTxOs are loaded)
-	if err := a.setCollateral(); err != nil {
+	if err := a.setCollateral(ctx); err != nil {
 		return a, err
 	}
 
 	// Build outputs from payments
-	outputs, err := a.buildOutputs()
+	outputs, err := a.buildOutputs(ctx)
 	if err != nil {
 		return a, err
 	}
@@ -1104,7 +1117,7 @@ func (a *Apollo) Complete() (*Apollo, error) {
 	// a silently wrong deposit produces a value-non-conserving transaction.
 	stakeDeposit := int64(StakeDeposit)
 	if len(a.certificates) > 0 {
-		pp, ppErr := a.Context.ProtocolParams()
+		pp, ppErr := a.Context.ProtocolParams(ctx)
 		if ppErr != nil {
 			return a, fmt.Errorf("failed to get protocol params for certificate deposit: %w", ppErr)
 		}
@@ -1172,7 +1185,7 @@ func (a *Apollo) Complete() (*Apollo, error) {
 	// MaxTxFee covers the size-based fee only; Conway reference-script fees are
 	// charged separately, so reserve the known reference-input / pinned-input
 	// surcharge before coin selection.
-	maxFee, feeErr := a.Context.MaxTxFee()
+	maxFee, feeErr := a.Context.MaxTxFee(ctx)
 	if feeErr != nil {
 		return a, fmt.Errorf("failed to compute max tx fee for coin selection: %w", feeErr)
 	}
@@ -1180,7 +1193,7 @@ func (a *Apollo) Complete() (*Apollo, error) {
 		return a, fmt.Errorf("max tx fee out of range: %d", maxFee)
 	}
 	prelimFee := int64(maxFee)
-	refScriptFeeReserve, err := a.referenceScriptFee(a.preselectedUtxos)
+	refScriptFeeReserve, err := a.referenceScriptFee(ctx, a.preselectedUtxos)
 	if err != nil {
 		return a, fmt.Errorf("failed to compute reference-script fee reserve for coin selection: %w", err)
 	}
@@ -1232,13 +1245,13 @@ func (a *Apollo) Complete() (*Apollo, error) {
 	allInputUtxos = append(allInputUtxos, a.preselectedUtxos...)
 	allInputUtxos = append(allInputUtxos, selectedUtxos...)
 	allInputUtxos = SortInputs(allInputUtxos)
-	if err := a.validateCollateral(); err != nil {
+	if err := a.validateCollateral(ctx); err != nil {
 		return a, err
 	}
 
 	// Automatic ExUnit estimation for script transactions
 	if a.isEstimateRequired && a.estimateExUnits {
-		if err := a.estimateExecutionUnits(allInputUtxos, outputs); err != nil {
+		if err := a.estimateExecutionUnits(ctx, allInputUtxos, outputs); err != nil {
 			return a, fmt.Errorf("ExUnit estimation failed: %w", err)
 		}
 	}
@@ -1256,7 +1269,7 @@ func (a *Apollo) Complete() (*Apollo, error) {
 	if a.forceFee {
 		fee = a.Fee
 	} else {
-		fee, err = a.estimateFee(allInputUtxos, outputs)
+		fee, err = a.estimateFee(ctx, allInputUtxos, outputs)
 		if err != nil {
 			return a, fmt.Errorf("fee estimation failed: %w", err)
 		}
@@ -1329,7 +1342,7 @@ func (a *Apollo) Complete() (*Apollo, error) {
 
 		if changeValue.Coin > 0 || changeValue.HasAssets() {
 			changeOutput := NewBabbageOutput(changeAddr, changeValue, nil, nil)
-			pp, err := a.Context.ProtocolParams()
+			pp, err := a.Context.ProtocolParams(ctx)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get protocol params for change output: %w", err)
 			}
@@ -1400,10 +1413,10 @@ func (a *Apollo) Complete() (*Apollo, error) {
 		// the fee accounts for the final collateral total/return footprint in
 		// the body. A collateral_return that only materializes after sizing
 		// would otherwise grow the tx past the frozen estimate.
-		if err := a.finalizeCollateral(fee); err != nil {
+		if err := a.finalizeCollateral(ctx, fee); err != nil {
 			return a, err
 		}
-		newFee, err := a.estimateFee(allInputUtxos, outputs)
+		newFee, err := a.estimateFee(ctx, allInputUtxos, outputs)
 		if err != nil {
 			return a, fmt.Errorf("fee re-estimation failed: %w", err)
 		}
@@ -1434,12 +1447,12 @@ func (a *Apollo) Complete() (*Apollo, error) {
 	// requires total collateral >= ceil(fee * collateralPercent / 100) against
 	// the ACTUAL fee, so a stale preliminary value triggers
 	// InsufficientCollateral. Resize here now that the fee is final.
-	if err := a.finalizeCollateral(fee); err != nil {
+	if err := a.finalizeCollateral(ctx, fee); err != nil {
 		return a, err
 	}
 
 	// Build transaction body
-	body, err := a.buildBody(allInputUtxos, outputs, uint64(fee))
+	body, err := a.buildBody(ctx, allInputUtxos, outputs, uint64(fee))
 	if err != nil {
 		return a, err
 	}
@@ -1518,18 +1531,24 @@ func (a *Apollo) GetTxCbor() ([]byte, error) {
 
 // Submit submits the transaction to the chain.
 func (a *Apollo) Submit() (common.Blake2b256, error) {
+	return a.SubmitContext(context.Background())
+}
+
+// SubmitContext submits the transaction to the chain.
+func (a *Apollo) SubmitContext(ctx context.Context) (common.Blake2b256, error) {
+	ctx = backend.ContextOrBackground(ctx)
 	txCbor, err := a.GetTxCbor()
 	if err != nil {
 		return common.Blake2b256{}, err
 	}
-	return a.Context.SubmitTx(txCbor)
+	return a.Context.SubmitTx(ctx, txCbor)
 }
 
 // --- internal helpers ---
 
-func (a *Apollo) loadUtxos() error {
+func (a *Apollo) loadUtxos(ctx context.Context) error {
 	for _, addr := range a.inputAddresses {
-		utxos, err := a.Context.Utxos(addr)
+		utxos, err := a.Context.Utxos(ctx, addr)
 		if err != nil {
 			return fmt.Errorf("failed to load UTxOs for %s: %w", addr.String(), err)
 		}
@@ -1537,7 +1556,7 @@ func (a *Apollo) loadUtxos() error {
 	}
 	// If no UTxOs loaded and wallet is set, load from wallet address
 	if len(a.utxos) == 0 && len(a.preselectedUtxos) == 0 && a.wallet != nil {
-		utxos, err := a.Context.Utxos(a.wallet.Address())
+		utxos, err := a.Context.Utxos(ctx, a.wallet.Address())
 		if err != nil {
 			return fmt.Errorf("failed to load wallet UTxOs: %w", err)
 		}
@@ -1546,10 +1565,10 @@ func (a *Apollo) loadUtxos() error {
 	return nil
 }
 
-func (a *Apollo) buildOutputs() ([]babbage.BabbageTransactionOutput, error) {
+func (a *Apollo) buildOutputs(ctx context.Context) ([]babbage.BabbageTransactionOutput, error) {
 	outputs := make([]babbage.BabbageTransactionOutput, 0, len(a.payments))
 	for _, payment := range a.payments {
-		if err := payment.EnsureMinUTXO(a.Context); err != nil {
+		if err := payment.EnsureMinUTXO(ctx, a.Context); err != nil {
 			return nil, fmt.Errorf("failed to ensure min UTxO: %w", err)
 		}
 		txOut, err := payment.ToTxOut()
@@ -1644,8 +1663,8 @@ func (a *Apollo) selectCoins(required, currentInput Value) ([]common.Utxo, error
 	return selected, nil
 }
 
-func (a *Apollo) estimateFee(inputs []common.Utxo, outputs []babbage.BabbageTransactionOutput) (int64, error) {
-	pp, err := a.Context.ProtocolParams()
+func (a *Apollo) estimateFee(ctx context.Context, inputs []common.Utxo, outputs []babbage.BabbageTransactionOutput) (int64, error) {
+	pp, err := a.Context.ProtocolParams(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -1657,11 +1676,11 @@ func (a *Apollo) estimateFee(inputs []common.Utxo, outputs []babbage.BabbageTran
 	// producing a fee that is a few hundred lovelace short and a FeeTooSmallUTxO
 	// rejection. Use a placeholder fee whose CBOR width matches (or exceeds) the
 	// final fee so the size — and thus the fee — is not underestimated.
-	placeholderFee, feeErr := a.Context.MaxTxFee()
+	placeholderFee, feeErr := a.Context.MaxTxFee(ctx)
 	if feeErr != nil || placeholderFee == 0 {
 		placeholderFee = 2_000_000
 	}
-	body, err := a.buildBody(inputs, outputs, placeholderFee)
+	body, err := a.buildBody(ctx, inputs, outputs, placeholderFee)
 	if err != nil {
 		return 0, err
 	}
@@ -1722,7 +1741,7 @@ func (a *Apollo) estimateFee(inputs []common.Utxo, outputs []babbage.BabbageTran
 	}
 
 	// Add the Conway tiered reference-script fee.
-	refScriptFee, err := a.referenceScriptFeeWithParams(inputs, pp)
+	refScriptFee, err := a.referenceScriptFeeWithParams(ctx, inputs, pp)
 	if err != nil {
 		return 0, err
 	}
@@ -1734,15 +1753,15 @@ func (a *Apollo) estimateFee(inputs []common.Utxo, outputs []babbage.BabbageTran
 	return fee, nil
 }
 
-func (a *Apollo) referenceScriptFee(inputs []common.Utxo) (int64, error) {
-	refScriptSize, err := a.totalReferenceScriptSize(inputs)
+func (a *Apollo) referenceScriptFee(ctx context.Context, inputs []common.Utxo) (int64, error) {
+	refScriptSize, err := a.totalReferenceScriptSize(ctx, inputs)
 	if err != nil {
 		return 0, err
 	}
 	if refScriptSize == 0 {
 		return 0, nil
 	}
-	pp, err := a.Context.ProtocolParams()
+	pp, err := a.Context.ProtocolParams(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -1756,8 +1775,8 @@ func (a *Apollo) referenceScriptFee(inputs []common.Utxo) (int64, error) {
 // reference inputs regardless of whether the transaction executes scripts, so
 // omitting it produces FeeTooSmallUTxO. The fee is naturally zero when no
 // referenced UTxO carries a script.
-func (a *Apollo) referenceScriptFeeWithParams(inputs []common.Utxo, pp backend.ProtocolParameters) (int64, error) {
-	refScriptSize, err := a.totalReferenceScriptSize(inputs)
+func (a *Apollo) referenceScriptFeeWithParams(ctx context.Context, inputs []common.Utxo, pp backend.ProtocolParameters) (int64, error) {
+	refScriptSize, err := a.totalReferenceScriptSize(ctx, inputs)
 	if err != nil {
 		return 0, err
 	}
@@ -1799,7 +1818,7 @@ func referenceScriptFeeForSize(refScriptSize int, pp backend.ProtocolParameters)
 // resolved against the chain context; an undercounted size silently underprices
 // the fee and gets the tx rejected, so a reference input that fails to resolve
 // is a hard error.
-func (a *Apollo) totalReferenceScriptSize(inputs []common.Utxo) (int, error) {
+func (a *Apollo) totalReferenceScriptSize(ctx context.Context, inputs []common.Utxo) (int, error) {
 	seen := make(map[string]struct{})
 	total := 0
 
@@ -1827,7 +1846,7 @@ func (a *Apollo) totalReferenceScriptSize(inputs []common.Utxo) (int, error) {
 			continue
 		}
 		seen[ref] = struct{}{}
-		utxo, err := a.Context.UtxoByRef(refInput.TxId, refInput.OutputIndex)
+		utxo, err := a.Context.UtxoByRef(ctx, refInput.TxId, refInput.OutputIndex)
 		if err != nil {
 			return 0, fmt.Errorf(
 				"failed to resolve reference input %s for reference-script fee: %w",
@@ -1846,18 +1865,18 @@ func (a *Apollo) totalReferenceScriptSize(inputs []common.Utxo) (int, error) {
 // estimateExecutionUnits builds a preliminary transaction and evaluates it
 // against the chain to get actual execution units for script redeemers.
 // The returned ExUnits include a buffer for safety.
-func (a *Apollo) estimateExecutionUnits(inputs []common.Utxo, outputs []babbage.BabbageTransactionOutput) error {
+func (a *Apollo) estimateExecutionUnits(ctx context.Context, inputs []common.Utxo, outputs []babbage.BabbageTransactionOutput) error {
 	// Build preliminary tx with current (possibly zero) ExUnits. The fee field
 	// is `omitempty`, so a zero fee is dropped from the CBOR and the body has no
 	// fee (key 2). Strict evaluators (Ogmios, and Blockfrost which proxies it)
 	// reject such a body with "field fee with key 2, not decoded". Use a
 	// non-zero placeholder fee so the field is always present; its value does
 	// not affect script evaluation.
-	placeholderFee, feeErr := a.Context.MaxTxFee()
+	placeholderFee, feeErr := a.Context.MaxTxFee(ctx)
 	if feeErr != nil || placeholderFee == 0 {
 		placeholderFee = 2_000_000
 	}
-	body, err := a.buildBody(inputs, outputs, placeholderFee)
+	body, err := a.buildBody(ctx, inputs, outputs, placeholderFee)
 	if err != nil {
 		return fmt.Errorf("failed to build preliminary tx body: %w", err)
 	}
@@ -1893,7 +1912,7 @@ func (a *Apollo) estimateExecutionUnits(inputs []common.Utxo, outputs []babbage.
 		return fmt.Errorf("failed to encode preliminary tx: %w", err)
 	}
 
-	evalResult, err := a.Context.EvaluateTx(txBytes, inputs)
+	evalResult, err := a.Context.EvaluateTx(ctx, txBytes, inputs)
 	if err != nil {
 		return fmt.Errorf("EvaluateTx failed: %w", err)
 	}
@@ -1991,6 +2010,7 @@ func bufferExUnits(v int64, factor float64) int64 {
 }
 
 func (a *Apollo) buildBody(
+	ctx context.Context,
 	inputs []common.Utxo,
 	outputs []babbage.BabbageTransactionOutput,
 	fee uint64,
@@ -2100,12 +2120,12 @@ func (a *Apollo) buildBody(
 
 	// Script data hash
 	if len(a.redeemers) > 0 || len(a.mintRedeemers) > 0 || len(a.stakeRedeemers) > 0 || len(a.datums) > 0 {
-		pp, err := a.Context.ProtocolParams()
+		pp, err := a.Context.ProtocolParams(ctx)
 		if err != nil {
 			return body, err
 		}
 		redeemerMap := a.buildRedeemerMap(inputs)
-		usedCostModels, err := a.usedScriptCostModels(inputs, pp.CostModels)
+		usedCostModels, err := a.usedScriptCostModels(ctx, inputs, pp.CostModels)
 		if err != nil {
 			return body, err
 		}
@@ -2221,6 +2241,7 @@ func (a *Apollo) buildRedeemerMap(inputs []common.Utxo) map[common.RedeemerKey]c
 }
 
 func (a *Apollo) usedScriptCostModels(
+	ctx context.Context,
 	inputs []common.Utxo,
 	available map[string][]int64,
 ) (map[string][]int64, error) {
@@ -2241,7 +2262,7 @@ func (a *Apollo) usedScriptCostModels(
 		addScriptLanguage(used, utxo.Output.ScriptRef())
 	}
 	for _, refInput := range a.referenceInputs {
-		utxo, err := a.Context.UtxoByRef(refInput.TxId, refInput.OutputIndex)
+		utxo, err := a.Context.UtxoByRef(ctx, refInput.TxId, refInput.OutputIndex)
 		if err != nil {
 			return nil, fmt.Errorf(
 				"failed to resolve reference input %s#%d for script data hash: %w",
@@ -2500,7 +2521,7 @@ func (a *Apollo) hasScripts() bool {
 // totalCollateral and collateralReturn are sized here from a preliminary
 // (max-by-size) fee; finalizeCollateral() resizes them once the final fee is
 // known.
-func (a *Apollo) setCollateral() error {
+func (a *Apollo) setCollateral(ctx context.Context) error {
 	if len(a.collaterals) > 0 || !a.hasScripts() {
 		return nil
 	}
@@ -2509,8 +2530,8 @@ func (a *Apollo) setCollateral() error {
 	minCollateral := int64(5_000_000) // conservative fallback
 	if a.collateralAmount > 0 {
 		minCollateral = a.collateralAmount
-	} else if pp, err := a.Context.ProtocolParams(); err == nil {
-		if maxFee, err := a.Context.MaxTxFee(); err == nil && pp.CollateralPercent > 0 &&
+	} else if pp, err := a.Context.ProtocolParams(ctx); err == nil {
+		if maxFee, err := a.Context.MaxTxFee(ctx); err == nil && pp.CollateralPercent > 0 &&
 			maxFee <= math.MaxInt64/uint64(pp.CollateralPercent) {
 			computed := int64(maxFee) * int64(pp.CollateralPercent) / 100 //nolint:gosec // bounded above
 			if computed > 0 {
@@ -2521,7 +2542,7 @@ func (a *Apollo) setCollateral() error {
 
 	candidates := a.utxos
 	if len(candidates) == 0 && a.wallet != nil {
-		loaded, err := a.Context.Utxos(a.wallet.Address())
+		loaded, err := a.Context.Utxos(ctx, a.wallet.Address())
 		if err != nil {
 			return fmt.Errorf("failed to load UTxOs for collateral selection: %w", err)
 		}
@@ -2664,11 +2685,11 @@ func (a *Apollo) restoreCollateralReservation() {
 //     ledger's implicit "all collateral inputs" rule, but it is still validated
 //     so an under-funded or asset-stranding collateral set is rejected locally
 //     rather than built into an invalid tx.
-func (a *Apollo) finalizeCollateral(fee int64) error {
+func (a *Apollo) finalizeCollateral(ctx context.Context, fee int64) error {
 	if len(a.collaterals) == 0 {
 		return nil
 	}
-	pp, err := a.Context.ProtocolParams()
+	pp, err := a.Context.ProtocolParams(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get protocol params for collateral sizing: %w", err)
 	}
@@ -2828,7 +2849,7 @@ func (a *Apollo) finalizeCollateral(fee int64) error {
 // on phase-2 script failure and regular inputs only on success; the two paths
 // are mutually exclusive. This matches mesh, lucid, and lucid-evolution and
 // lets a single-UTxO wallet build a script transaction.
-func (a *Apollo) validateCollateral() error {
+func (a *Apollo) validateCollateral(ctx context.Context) error {
 	if len(a.collaterals) == 0 {
 		return nil
 	}
@@ -2851,7 +2872,7 @@ func (a *Apollo) validateCollateral() error {
 		}
 	}
 	// Enforce the protocol max on collateral inputs when known.
-	if pp, err := a.Context.ProtocolParams(); err == nil && pp.MaxCollateralInputs > 0 &&
+	if pp, err := a.Context.ProtocolParams(ctx); err == nil && pp.MaxCollateralInputs > 0 &&
 		len(a.collaterals) > pp.MaxCollateralInputs {
 		return fmt.Errorf(
 			"too many collateral inputs: %d exceeds protocol maximum of %d",

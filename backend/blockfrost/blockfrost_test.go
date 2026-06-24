@@ -2,8 +2,10 @@ package blockfrost
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"math/big"
@@ -11,6 +13,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
@@ -60,7 +63,7 @@ func TestHydrateUtxoResolvesInlineDatumAndReferenceScript(t *testing.T) {
 		ReferenceScriptHash: scriptHashHex,
 	}
 
-	utxo, err := ctx.hydrateUtxo(raw, addr)
+	utxo, err := ctx.hydrateUtxo(context.Background(), raw, addr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,9 +108,48 @@ func TestEvaluateTxRejectsRedeemerIndexOverflow(t *testing.T) {
 	defer server.Close()
 
 	ctx := NewBlockFrostChainContext(server.URL, 0, "")
-	_, err := ctx.EvaluateTx([]byte{0x84}, nil)
+	_, err := ctx.EvaluateTx(context.Background(), []byte{0x84}, nil)
 	if err == nil {
 		t.Fatal("expected redeemer index overflow error")
+	}
+}
+
+func TestCurrentEpochUsesRequestContext(t *testing.T) {
+	started := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v0/epochs/latest" {
+			http.NotFound(w, r)
+			return
+		}
+		close(started)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	bfc := NewBlockFrostChainContext(server.URL, 0, "")
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := bfc.CurrentEpoch(ctx)
+		errCh <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Blockfrost request")
+	}
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for canceled request")
 	}
 }
 
@@ -133,7 +175,7 @@ func TestEvaluateTxSendsHexEncodedBody(t *testing.T) {
 	defer server.Close()
 
 	ctx := NewBlockFrostChainContext(server.URL, 0, "")
-	result, err := ctx.EvaluateTx(txCbor, nil)
+	result, err := ctx.EvaluateTx(context.Background(), txCbor, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +676,7 @@ func TestEvaluateTxWithAdditionalUtxosTargetsUtxosEndpoint(t *testing.T) {
 	defer server.Close()
 
 	ctx := NewBlockFrostChainContext(server.URL, 0, "")
-	result, err := ctx.EvaluateTx([]byte{0x84}, []common.Utxo{sampleCommonUtxo(t)})
+	result, err := ctx.EvaluateTx(context.Background(), []byte{0x84}, []common.Utxo{sampleCommonUtxo(t)})
 	if err != nil {
 		t.Fatal(err)
 	}

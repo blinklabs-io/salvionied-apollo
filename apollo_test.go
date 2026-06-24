@@ -2,8 +2,10 @@ package apollo
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"encoding/hex"
+	"errors"
 	"math/big"
 	"strconv"
 	"testing"
@@ -42,6 +44,30 @@ func testAddress(t *testing.T) common.Address {
 		t.Fatal(err)
 	}
 	return addr
+}
+
+func TestCompleteContextCanceled(t *testing.T) {
+	cc := setupFixedContext()
+	addr := testAddress(t)
+	p, err := NewPayment(validTestAddrBech32, 2_000_000, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = New(cc).
+		SetWallet(NewExternalWallet(addr)).
+		AddPayment(p).
+		SetTtl(50000000).
+		CompleteContext(ctx)
+	if err == nil {
+		t.Fatal("expected canceled context error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
 }
 
 func setupFixedContext() *fixed.FixedChainContext {
@@ -1212,7 +1238,7 @@ func TestCompleteReservesReferenceScriptFeeForCoinSelection(t *testing.T) {
 	if len(inputRefs) != 2 {
 		t.Fatalf("expected both wallet UTxOs to be selected, got %v", inputRefs)
 	}
-	maxFee, err := cc.MaxTxFee()
+	maxFee, err := cc.MaxTxFee(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1406,7 +1432,7 @@ func TestSetCollateralSkipsExactMultiAssetCandidateWithoutMutatingState(t *testi
 		AttachScript(common.PlutusV2Script([]byte{0x01, 0x02})).
 		AddLoadedUTxOs(skipped, selected)
 
-	if err := a.setCollateral(); err != nil {
+	if err := a.setCollateral(context.Background()); err != nil {
 		t.Fatalf("setCollateral failed: %v", err)
 	}
 	if len(a.collaterals) != 1 {
@@ -1446,7 +1472,7 @@ func TestSetCollateralRejectedExactMultiAssetCandidateLeavesBuilderCleanOnError(
 		AttachScript(common.PlutusV2Script([]byte{0x01, 0x02})).
 		AddLoadedUTxOs(skipped)
 
-	err := a.setCollateral()
+	err := a.setCollateral(context.Background())
 	if err == nil {
 		t.Fatal("expected collateral selection error")
 	}
@@ -1702,7 +1728,7 @@ func TestSingleUtxoIsBothInputAndCollateral(t *testing.T) {
 	}
 
 	// total_collateral >= ceil(fee * collateralPercent / 100) and <= input ADA.
-	pp, _ := cc.ProtocolParams()
+	pp, _ := cc.ProtocolParams(context.Background())
 	fee := a.tx.Body.TxFee
 	required := (fee*uint64(pp.CollateralPercent) + 99) / 100 //nolint:gosec // CollateralPercent is a positive protocol parameter
 	totalColl := a.tx.Body.TxTotalCollateral

@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -29,7 +30,8 @@ func NewCachedChainContext(inner backend.ChainContext, ttl time.Duration) *Cache
 	}
 }
 
-func (c *CachedChainContext) ProtocolParams() (backend.ProtocolParameters, error) {
+func (c *CachedChainContext) ProtocolParams(ctx context.Context) (backend.ProtocolParameters, error) {
+	ctx = backend.ContextOrBackground(ctx)
 	c.mu.Lock()
 	if c.cachedParams != nil && time.Since(c.paramsCacheAt) < c.ttl {
 		pp := *c.cachedParams
@@ -48,7 +50,7 @@ func (c *CachedChainContext) ProtocolParams() (backend.ProtocolParameters, error
 	}
 	c.mu.Unlock()
 
-	pp, err := c.inner.ProtocolParams()
+	pp, err := c.inner.ProtocolParams(ctx)
 	if err != nil {
 		return pp, err
 	}
@@ -73,7 +75,8 @@ func (c *CachedChainContext) ProtocolParams() (backend.ProtocolParameters, error
 	return pp, nil
 }
 
-func (c *CachedChainContext) GenesisParams() (backend.GenesisParameters, error) {
+func (c *CachedChainContext) GenesisParams(ctx context.Context) (backend.GenesisParameters, error) {
+	ctx = backend.ContextOrBackground(ctx)
 	c.mu.Lock()
 	if c.cachedGenesis != nil && time.Since(c.genesisCacheAt) < c.ttl {
 		gp := *c.cachedGenesis
@@ -82,7 +85,7 @@ func (c *CachedChainContext) GenesisParams() (backend.GenesisParameters, error) 
 	}
 	c.mu.Unlock()
 
-	gp, err := c.inner.GenesisParams()
+	gp, err := c.inner.GenesisParams(ctx)
 	if err != nil {
 		return gp, err
 	}
@@ -99,34 +102,34 @@ func (c *CachedChainContext) NetworkId() uint8 {
 	return c.inner.NetworkId()
 }
 
-func (c *CachedChainContext) CurrentEpoch() (uint64, error) {
-	return c.inner.CurrentEpoch()
+func (c *CachedChainContext) CurrentEpoch(ctx context.Context) (uint64, error) {
+	return c.inner.CurrentEpoch(backend.ContextOrBackground(ctx))
 }
 
-func (c *CachedChainContext) MaxTxFee() (uint64, error) {
-	return c.inner.MaxTxFee()
+func (c *CachedChainContext) MaxTxFee(ctx context.Context) (uint64, error) {
+	return c.inner.MaxTxFee(backend.ContextOrBackground(ctx))
 }
 
-func (c *CachedChainContext) Tip() (uint64, error) {
-	return c.inner.Tip()
+func (c *CachedChainContext) Tip(ctx context.Context) (uint64, error) {
+	return c.inner.Tip(backend.ContextOrBackground(ctx))
 }
 
-func (c *CachedChainContext) Utxos(address common.Address) ([]common.Utxo, error) {
-	return c.inner.Utxos(address)
+func (c *CachedChainContext) Utxos(ctx context.Context, address common.Address) ([]common.Utxo, error) {
+	return c.inner.Utxos(backend.ContextOrBackground(ctx), address)
 }
 
-func (c *CachedChainContext) SubmitTx(txCbor []byte) (common.Blake2b256, error) {
-	return c.inner.SubmitTx(txCbor)
+func (c *CachedChainContext) SubmitTx(ctx context.Context, txCbor []byte) (common.Blake2b256, error) {
+	return c.inner.SubmitTx(backend.ContextOrBackground(ctx), txCbor)
 }
 
-func (c *CachedChainContext) EvaluateTx(txCbor []byte, additionalUtxos []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error) {
-	return c.inner.EvaluateTx(txCbor, additionalUtxos)
+func (c *CachedChainContext) EvaluateTx(ctx context.Context, txCbor []byte, additionalUtxos []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error) {
+	return c.inner.EvaluateTx(backend.ContextOrBackground(ctx), txCbor, additionalUtxos)
 }
 
-func (c *CachedChainContext) UtxoByRef(txHash common.Blake2b256, index uint32) (*common.Utxo, error) {
-	return c.inner.UtxoByRef(txHash, index)
+func (c *CachedChainContext) UtxoByRef(ctx context.Context, txHash common.Blake2b256, index uint32) (*common.Utxo, error) {
+	return c.inner.UtxoByRef(backend.ContextOrBackground(ctx), txHash, index)
 }
 
-func (c *CachedChainContext) ScriptCbor(scriptHash common.Blake2b224) ([]byte, error) {
-	return c.inner.ScriptCbor(scriptHash)
+func (c *CachedChainContext) ScriptCbor(ctx context.Context, scriptHash common.Blake2b224) ([]byte, error) {
+	return c.inner.ScriptCbor(backend.ContextOrBackground(ctx), scriptHash)
 }

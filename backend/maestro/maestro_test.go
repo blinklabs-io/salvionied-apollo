@@ -2,6 +2,7 @@ package maestro
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"io"
@@ -215,7 +216,7 @@ func TestSubmitTxPostsCborToTxManager(t *testing.T) {
 	}
 	ctx.client.BaseUrl = server.URL
 
-	txHash, err := ctx.SubmitTx(txCbor)
+	txHash, err := ctx.SubmitTx(context.Background(), txCbor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +344,7 @@ func TestEvaluateTxWithAdditionalUtxosPostsObjectShape(t *testing.T) {
 	}
 	ctx.client.BaseUrl = server.URL
 
-	result, err := ctx.EvaluateTx([]byte{0x84, 0xa3, 0x00}, []common.Utxo{utxo})
+	result, err := ctx.EvaluateTx(context.Background(), []byte{0x84, 0xa3, 0x00}, []common.Utxo{utxo})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +400,7 @@ func TestEvaluateTxEmptyAdditionalUtxosUsesSdkPath(t *testing.T) {
 			}
 			ctx.client.BaseUrl = server.URL
 
-			result, err := ctx.EvaluateTx([]byte{0x84}, tc.utxos)
+			result, err := ctx.EvaluateTx(context.Background(), []byte{0x84}, tc.utxos)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -455,7 +456,7 @@ func TestEvaluateTxWithAdditionalUtxosPropagatesHTTPError(t *testing.T) {
 	}
 	ctx.client.BaseUrl = server.URL
 
-	if _, err := ctx.EvaluateTx([]byte{0x84}, []common.Utxo{utxo}); err == nil {
+	if _, err := ctx.EvaluateTx(context.Background(), []byte{0x84}, []common.Utxo{utxo}); err == nil {
 		t.Fatal("expected error for non-200 evaluate response")
 	}
 }
