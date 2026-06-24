@@ -8,10 +8,11 @@ Cost models define the execution costs for each primitive operation in Plutus sc
 
 ## Cost Model Retrieval
 
-In Apollo v2, cost models are retrieved from the chain context via `ProtocolParams()`:
+In Apollo v2, cost models are retrieved from the chain context via
+`ProtocolParams(ctx)`:
 
 ```go
-pp, err := cc.ProtocolParams()
+pp, err := cc.ProtocolParams(ctx)
 if err != nil {
     // handle error
 }

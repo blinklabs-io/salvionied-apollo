@@ -18,6 +18,7 @@ running it.
 package main
 
 import (
+    "context"
     "encoding/hex"
     "fmt"
 
@@ -28,6 +29,8 @@ import (
 )
 
 func main() {
+    ctx := context.Background()
+
     // ChainContext supplies protocol parameters, UTxOs, evaluation, and submit.
     bfc := blockfrost.NewBlockFrostChainContext(
         "https://cardano-mainnet.blockfrost.io/api/v0",
@@ -43,7 +46,7 @@ func main() {
     }
 
     // Query spendable UTxOs for the wallet address.
-    utxos, err := bfc.Utxos(a.GetWallet().Address())
+    utxos, err := bfc.Utxos(ctx, a.GetWallet().Address())
     if err != nil {
         panic(err)
     }
@@ -54,10 +57,10 @@ func main() {
     }
 
     // AddLoadedUTxOs provides candidate inputs; PayToAddress adds an output.
-    // Complete selects inputs, balances change, calculates fees, and builds the tx.
+    // CompleteContext selects inputs, balances change, calculates fees, and builds the tx.
     a, err = a.AddLoadedUTxOs(utxos...).
         PayToAddress(receiver, 1_000_000).
-        Complete()
+        CompleteContext(ctx)
     if err != nil {
         panic(err)
     }
@@ -75,8 +78,8 @@ func main() {
     }
     fmt.Println(hex.EncodeToString(txCbor))
 
-    // Submit sends the signed transaction through the ChainContext backend.
-    txId, err := a.Submit()
+    // SubmitContext sends the signed transaction through the ChainContext backend.
+    txId, err := a.SubmitContext(ctx)
     if err != nil {
         panic(err)
     }

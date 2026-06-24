@@ -31,9 +31,7 @@ type MaestroChainContext struct {
 	client    *maestroClient.Client
 	networkId uint8
 	// apiKey is retained alongside the SDK client because the SDK keeps its
-	// own copy unexported. EvaluateTx with additional UTxOs issues a raw POST
-	// (the SDK's additional_utxos field is []string and cannot carry the
-	// object-shaped entries Maestro requires) and needs the key for auth.
+	// own copy unexported and Apollo issues raw context-aware HTTP requests.
 	apiKey string
 }
 
@@ -86,11 +84,8 @@ func NewMaestroChainContextWithNetwork(networkId uint8, projectId string, networ
 
 func (m *MaestroChainContext) ProtocolParams(ctx context.Context) (backend.ProtocolParameters, error) {
 	ctx = backend.ContextOrBackground(ctx)
-	if err := ctx.Err(); err != nil {
-		return backend.ProtocolParameters{}, err
-	}
-	resp, err := m.client.ProtocolParameters()
-	if err != nil {
+	var resp models.ProtocolParameters
+	if err := m.getJSON(ctx, "/protocol-parameters", &resp); err != nil {
 		return backend.ProtocolParameters{}, err
 	}
 
@@ -192,11 +187,8 @@ func (m *MaestroChainContext) NetworkId() uint8 {
 
 func (m *MaestroChainContext) CurrentEpoch(ctx context.Context) (uint64, error) {
 	ctx = backend.ContextOrBackground(ctx)
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-	resp, err := m.client.CurrentEpoch()
-	if err != nil {
+	var resp models.EpochResp
+	if err := m.getJSON(ctx, "/epochs/current", &resp); err != nil {
 		return 0, err
 	}
 	if resp.Data.EpochNo < 0 {
@@ -216,11 +208,8 @@ func (m *MaestroChainContext) MaxTxFee(ctx context.Context) (uint64, error) {
 
 func (m *MaestroChainContext) Tip(ctx context.Context) (uint64, error) {
 	ctx = backend.ContextOrBackground(ctx)
-	if err := ctx.Err(); err != nil {
-		return 0, err
-	}
-	resp, err := m.client.ChainTip()
-	if err != nil {
+	var resp models.ChainTip
+	if err := m.getJSON(ctx, "/chain-tip", &resp); err != nil {
 		return 0, err
 	}
 	if resp.Data.Slot < 0 {
@@ -240,8 +229,9 @@ func (m *MaestroChainContext) Utxos(ctx context.Context, address common.Address)
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		resp, err := m.client.UtxosAtAddress(address.String(), params)
-		if err != nil {
+		path := fmt.Sprintf("/addresses/%s/utxos%s", address.String(), params.Format())
+		var resp models.UtxosAtAddress
+		if err := m.getJSON(ctx, path, &resp); err != nil {
 			return nil, err
 		}
 
@@ -270,21 +260,16 @@ func (m *MaestroChainContext) Utxos(ctx context.Context, address common.Address)
 
 func (m *MaestroChainContext) SubmitTx(ctx context.Context, txCbor []byte) (common.Blake2b256, error) {
 	ctx = backend.ContextOrBackground(ctx)
-	if err := ctx.Err(); err != nil {
-		return common.Blake2b256{}, err
-	}
 	// The Maestro SDK's Client.SubmitTx posts to a corrupted URL
-	// ("/submitmodels.BasicResponse{}/tx") and can never work. Use
-	// TxManagerSubmit instead, which posts the hex-encoded transaction
-	// CBOR to the documented POST /txmanager submit endpoint.
-	txCborHex := hex.EncodeToString(txCbor)
-	txHash, err := m.client.TxManagerSubmit(txCborHex)
+	// ("/submitmodels.BasicResponse{}/tx") and can never work. Use the
+	// documented POST /txmanager endpoint directly, preserving caller context.
+	data, err := m.request(ctx, http.MethodPost, "/txmanager", bytes.NewReader(txCbor), "application/cbor", "application/cbor", http.StatusOK, http.StatusAccepted)
 	if err != nil {
 		return common.Blake2b256{}, fmt.Errorf("maestro tx submission failed: %w", err)
 	}
 	// The endpoint returns the tx hash as a plain-text body; tolerate JSON
 	// string quoting and surrounding whitespace.
-	txHash = strings.Trim(strings.TrimSpace(txHash), `"`)
+	txHash := strings.Trim(strings.TrimSpace(string(data)), `"`)
 	hashBytes, err := hex.DecodeString(txHash)
 	if err != nil {
 		return common.Blake2b256{}, fmt.Errorf("invalid tx hash %q in submit response: %w", txHash, err)
@@ -298,22 +283,21 @@ func (m *MaestroChainContext) SubmitTx(ctx context.Context, txCbor []byte) (comm
 }
 
 // EvaluateTx evaluates the script execution budgets for a transaction. When
-// additionalUtxos is empty it uses the Maestro SDK's EvaluateTx, which posts the
-// bare tx CBOR. When resolved UTxOs are supplied (e.g. off-chain or chained
-// inputs not yet visible to Maestro) it issues a raw POST to
-// /transactions/evaluate with the documented object-shaped additional_utxos
-// field. The SDK's own additional_utxos type is []string and cannot represent
-// the required {tx_hash, index, txout_cbor} entries, so the request is built
-// here against the SDK client's base URL and API key.
+// resolved UTxOs are supplied (e.g. off-chain or chained inputs not yet visible
+// to Maestro), it sends the documented object-shaped additional_utxos field.
+// The Maestro SDK's additional_utxos type is []string and cannot represent the
+// required {tx_hash, index, txout_cbor} entries, so the request is built here
+// against the SDK client's base URL and API key.
 func (m *MaestroChainContext) EvaluateTx(ctx context.Context, txCbor []byte, additionalUtxos []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error) {
 	ctx = backend.ContextOrBackground(ctx)
 	txHex := hex.EncodeToString(txCbor)
 
 	if len(additionalUtxos) == 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
+		reqBody, err := json.Marshal(models.EvaluateTx{Cbor: txHex})
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal evaluate request: %w", err)
 		}
-		evalResp, err := m.client.EvaluateTx(txHex)
+		evalResp, err := m.postEvaluate(ctx, reqBody)
 		if err != nil {
 			return nil, err
 		}
@@ -394,32 +378,12 @@ func maestroAdditionalUtxoFromUtxo(utxo common.Utxo) (maestroAdditionalUtxo, err
 // same shape the SDK uses.
 func (m *MaestroChainContext) postEvaluate(ctx context.Context, body []byte) (models.EvaluateTxResponse, error) {
 	ctx = backend.ContextOrBackground(ctx)
-	url := m.client.BaseUrl + "/transactions/evaluate"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	data, err := m.request(ctx, http.MethodPost, "/transactions/evaluate", bytes.NewReader(body), "application/json", "application/json", http.StatusOK)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("api-key", m.apiKey)
-
-	httpClient := m.client.HTTPClient
-	if httpClient == nil {
-		httpClient = http.DefaultClient
-	}
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("maestro evaluate failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(msg)))
-	}
-
 	var evalResp models.EvaluateTxResponse
-	if err := json.NewDecoder(resp.Body).Decode(&evalResp); err != nil {
+	if err := json.Unmarshal(data, &evalResp); err != nil {
 		return nil, fmt.Errorf("failed to decode evaluate response: %w", err)
 	}
 	return evalResp, nil
@@ -453,12 +417,10 @@ func evaluationsToExUnits(evals models.EvaluateTxResponse) (map[common.RedeemerK
 
 func (m *MaestroChainContext) UtxoByRef(ctx context.Context, txHash common.Blake2b256, index uint32) (*common.Utxo, error) {
 	ctx = backend.ContextOrBackground(ctx)
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	hashHex := hex.EncodeToString(txHash.Bytes())
-	resp, err := m.client.TransactionOutputFromReference(hashHex, int(index), nil)
-	if err != nil {
+	var resp models.TransactionOutputFromReference
+	path := fmt.Sprintf("/transactions/%s/outputs/%d/txo", hashHex, index)
+	if err := m.getJSON(ctx, path, &resp); err != nil {
 		return nil, err
 	}
 
@@ -475,18 +437,65 @@ func (m *MaestroChainContext) UtxoByRef(ctx context.Context, txHash common.Blake
 
 func (m *MaestroChainContext) ScriptCbor(ctx context.Context, scriptHash common.Blake2b224) ([]byte, error) {
 	ctx = backend.ContextOrBackground(ctx)
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
 	hashHex := hex.EncodeToString(scriptHash.Bytes())
-	resp, err := m.client.ScriptByHash(hashHex)
-	if err != nil {
+	var resp models.ScriptByHash
+	if err := m.getJSON(ctx, "/scripts/"+hashHex, &resp); err != nil {
 		return nil, err
 	}
 	if resp.Data.Bytes == "" {
 		return nil, errors.New("no script CBOR available")
 	}
 	return hex.DecodeString(resp.Data.Bytes)
+}
+
+func (m *MaestroChainContext) getJSON(ctx context.Context, path string, out any) error {
+	data, err := m.request(ctx, http.MethodGet, path, nil, "", "application/json", http.StatusOK)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return fmt.Errorf("failed to decode maestro response: %w", err)
+	}
+	return nil
+}
+
+func (m *MaestroChainContext) request(ctx context.Context, method string, path string, body io.Reader, contentType string, accept string, okStatuses ...int) ([]byte, error) {
+	ctx = backend.ContextOrBackground(ctx)
+	req, err := http.NewRequestWithContext(ctx, method, m.client.BaseUrl+path, body)
+	if err != nil {
+		return nil, err
+	}
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	req.Header.Set("api-key", m.apiKey)
+
+	httpClient := m.client.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil || resp.Body == nil {
+		return nil, errors.New("maestro: nil response")
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	for _, status := range okStatuses {
+		if resp.StatusCode == status {
+			return data, nil
+		}
+	}
+	return nil, fmt.Errorf("maestro API error %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
 }
 
 func maestroUtxoToCommon(raw models.Utxo, address common.Address) (common.Utxo, error) {

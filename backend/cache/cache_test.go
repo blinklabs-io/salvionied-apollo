@@ -15,6 +15,8 @@ type contextRecordingChainContext struct {
 	got context.Context
 }
 
+type contextTestKey struct{}
+
 func (c *contextRecordingChainContext) Utxos(ctx context.Context, address common.Address) ([]common.Utxo, error) {
 	c.got = ctx
 	return c.FixedChainContext.Utxos(ctx, address)
@@ -23,7 +25,7 @@ func (c *contextRecordingChainContext) Utxos(ctx context.Context, address common
 func TestCachedChainContextPassesContextThrough(t *testing.T) {
 	inner := &contextRecordingChainContext{FixedChainContext: fixed.NewEmptyFixedChainContext()}
 	cached := NewCachedChainContext(inner, time.Minute)
-	ctx := context.WithValue(context.Background(), struct{}{}, "marker")
+	ctx := context.WithValue(context.Background(), contextTestKey{}, "marker")
 
 	_, err := cached.Utxos(ctx, common.Address{})
 	if err != nil {

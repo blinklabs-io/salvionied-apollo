@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/blinklabs-io/gouroboros/cbor"
 	"github.com/blinklabs-io/gouroboros/ledger/babbage"
@@ -371,7 +373,7 @@ func TestEvaluateTxWithAdditionalUtxosPostsObjectShape(t *testing.T) {
 	}
 }
 
-func TestEvaluateTxEmptyAdditionalUtxosUsesSdkPath(t *testing.T) {
+func TestEvaluateTxEmptyAdditionalUtxosPostsSdkCompatibleShape(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		utxos []common.Utxo
@@ -404,11 +406,9 @@ func TestEvaluateTxEmptyAdditionalUtxosUsesSdkPath(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			// The SDK EvaluateTx posts to /transactions/evaluate as well, so the
-			// path alone does not distinguish the two code paths. The SDK body
-			// serializes additional_utxos from a nil []string, which encodes as
-			// JSON null; the raw object-shaped path would instead emit an array.
-			// Asserting null proves the empty/nil slice took the SDK fallback.
+			// Preserve the SDK-compatible request shape for no additional UTxOs:
+			// additional_utxos is null, while the object-shaped resolved-UTxO
+			// path emits an array.
 			if gotPath != "/transactions/evaluate" {
 				t.Fatalf("path = %q, want /transactions/evaluate", gotPath)
 			}
@@ -428,6 +428,118 @@ func TestEvaluateTxEmptyAdditionalUtxosUsesSdkPath(t *testing.T) {
 			spendKey := common.RedeemerKey{Tag: common.RedeemerTagSpend, Index: 0}
 			if eu := result[spendKey]; eu.Memory != 10 || eu.Steps != 20 {
 				t.Fatalf("unexpected spend budget %+v", eu)
+			}
+		})
+	}
+}
+
+func TestMaestroNetworkCallsUseRequestContext(t *testing.T) {
+	var txHash common.Blake2b256
+	addr := testAddress(t)
+	for _, tc := range []struct {
+		name   string
+		invoke func(context.Context, *MaestroChainContext) error
+	}{
+		{
+			name: "ProtocolParams",
+			invoke: func(ctx context.Context, m *MaestroChainContext) error {
+				_, err := m.ProtocolParams(ctx)
+				return err
+			},
+		},
+		{
+			name: "CurrentEpoch",
+			invoke: func(ctx context.Context, m *MaestroChainContext) error {
+				_, err := m.CurrentEpoch(ctx)
+				return err
+			},
+		},
+		{
+			name: "Tip",
+			invoke: func(ctx context.Context, m *MaestroChainContext) error {
+				_, err := m.Tip(ctx)
+				return err
+			},
+		},
+		{
+			name: "Utxos",
+			invoke: func(ctx context.Context, m *MaestroChainContext) error {
+				_, err := m.Utxos(ctx, addr)
+				return err
+			},
+		},
+		{
+			name: "SubmitTx",
+			invoke: func(ctx context.Context, m *MaestroChainContext) error {
+				_, err := m.SubmitTx(ctx, []byte{0x84})
+				return err
+			},
+		},
+		{
+			name: "EvaluateTx",
+			invoke: func(ctx context.Context, m *MaestroChainContext) error {
+				_, err := m.EvaluateTx(ctx, []byte{0x84}, nil)
+				return err
+			},
+		},
+		{
+			name: "UtxoByRef",
+			invoke: func(ctx context.Context, m *MaestroChainContext) error {
+				_, err := m.UtxoByRef(ctx, txHash, 0)
+				return err
+			},
+		},
+		{
+			name: "ScriptCbor",
+			invoke: func(ctx context.Context, m *MaestroChainContext) error {
+				_, err := m.ScriptCbor(ctx, common.Blake2b224{})
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			started := make(chan struct{})
+			release := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				close(started)
+				select {
+				case <-r.Context().Done():
+				case <-release:
+				}
+			}))
+			defer func() {
+				close(release)
+				server.Close()
+			}()
+
+			m, err := NewMaestroChainContextWithNetwork(0, "project-id", "preprod")
+			if err != nil {
+				t.Fatal(err)
+			}
+			m.client.BaseUrl = server.URL
+
+			ctx, cancel := context.WithCancel(context.Background())
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- tc.invoke(ctx, m)
+			}()
+
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				cancel()
+				t.Fatal("timed out waiting for Maestro request")
+			}
+
+			cancel()
+
+			select {
+			case err := <-errCh:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("expected context.Canceled, got %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for canceled Maestro request")
 			}
 		})
 	}
