@@ -263,7 +263,7 @@ func (m *MaestroChainContext) SubmitTx(ctx context.Context, txCbor []byte) (comm
 	// The Maestro SDK's Client.SubmitTx posts to a corrupted URL
 	// ("/submitmodels.BasicResponse{}/tx") and can never work. Use the
 	// documented POST /txmanager endpoint directly, preserving caller context.
-	data, err := m.request(ctx, http.MethodPost, "/txmanager", bytes.NewReader(txCbor), "application/cbor", "application/cbor", http.StatusOK, http.StatusAccepted)
+	data, err := m.request(ctx, http.MethodPost, "/txmanager", bytes.NewReader(txCbor), "application/cbor", "text/plain", http.StatusOK, http.StatusAccepted)
 	if err != nil {
 		return common.Blake2b256{}, fmt.Errorf("maestro tx submission failed: %w", err)
 	}

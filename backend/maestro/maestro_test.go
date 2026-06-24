@@ -197,10 +197,11 @@ func TestNewMaestroChainContextWithNetworkAllowlist(t *testing.T) {
 func TestSubmitTxPostsCborToTxManager(t *testing.T) {
 	txCbor := []byte{0x84, 0xa3, 0x00}
 	wantHash := bytes.Repeat([]byte{0xab}, common.Blake2b256Size)
-	var gotPath, gotContentType string
+	var gotPath, gotAccept, gotContentType string
 	var gotBody []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotAccept = r.Header.Get("Accept")
 		gotContentType = r.Header.Get("Content-Type")
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -224,6 +225,9 @@ func TestSubmitTxPostsCborToTxManager(t *testing.T) {
 	}
 	if gotPath != "/txmanager" {
 		t.Fatalf("submit path = %q, want /txmanager", gotPath)
+	}
+	if gotAccept != "text/plain" {
+		t.Fatalf("Accept = %q, want text/plain", gotAccept)
 	}
 	if gotContentType != "application/cbor" {
 		t.Fatalf("Content-Type = %q, want application/cbor", gotContentType)
