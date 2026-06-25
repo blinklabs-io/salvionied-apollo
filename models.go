@@ -1,6 +1,7 @@
 package apollo
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -100,7 +101,7 @@ func (u *Unit) toMintValue() (Value, error) {
 
 // PaymentI is the interface for payment types.
 type PaymentI interface {
-	EnsureMinUTXO(cc backend.ChainContext) error
+	EnsureMinUTXO(ctx context.Context, cc backend.ChainContext) error
 	ToTxOut() (*babbage.BabbageTransactionOutput, error)
 	ToValue() (Value, error)
 }
@@ -223,11 +224,12 @@ func (p *Payment) ToValue() (Value, error) {
 // EnsureMinUTXO ensures the payment meets the minimum UTxO requirement.
 // It iterates because raising Lovelace can increase the CBOR-encoded output size,
 // which in turn may require a slightly higher min UTxO. Converges in 1-2 iterations.
-func (p *Payment) EnsureMinUTXO(cc backend.ChainContext) error {
+func (p *Payment) EnsureMinUTXO(ctx context.Context, cc backend.ChainContext) error {
 	if len(p.Units) == 0 && p.Lovelace >= constants.MinLovelace && p.Datum == nil && len(p.DatumHash) == 0 && p.ScriptRef == nil {
 		return nil
 	}
-	pp, err := cc.ProtocolParams()
+	ctx = backend.ContextOrBackground(ctx)
+	pp, err := cc.ProtocolParams(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get protocol params: %w", err)
 	}

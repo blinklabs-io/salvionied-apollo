@@ -307,6 +307,22 @@ import "github.com/Salvionied/apollo/v2/backend"
 
 Supported backends: `blockfrost`, `ogmios`, `maestro`, `utxorpc`, `fixed` (testing).
 
+Methods that can block or call the network now accept `context.Context`:
+`ProtocolParams`, `GenesisParams`, `CurrentEpoch`, `MaxTxFee`, `Tip`, `Utxos`,
+`SubmitTx`, `EvaluateTx`, `UtxoByRef`, and `ScriptCbor`. `NetworkId` remains
+context-free.
+
+```go
+pp, err := cc.ProtocolParams(ctx)
+utxos, err := cc.Utxos(ctx, addr)
+eval, err := cc.EvaluateTx(ctx, txCbor, additionalUtxos)
+```
+
+Apollo keeps the existing `Complete()`, `Submit()`, and `UtxoFromRef(...)`
+methods as `context.Background()` wrappers. Use `CompleteContext(ctx)`,
+`SubmitContext(ctx)`, and `UtxoFromRefContext(ctx, ...)` when callers need
+cancellation or deadlines.
+
 ### 13. Value Type
 
 v2 introduces an explicit `Value` type replacing various ad-hoc representations:
@@ -392,6 +408,7 @@ a, err = a.SetWalletFromMnemonicWithPassphrase(mnemonic, "pass")  // with passph
 - `CollectFrom(utxo, redeemer, exUnits) *Apollo`
 - `ConsumeUTxO(utxo, payments...) (*Apollo, error)`
 - `UtxoFromRef(hash, index) (*Utxo, error)`
+- `UtxoFromRefContext(ctx, hash, index) (*Utxo, error)`
 - `GetUsedUTxOs() []string`
 
 ### Scripts & Minting
@@ -456,10 +473,12 @@ a, err = a.SetWalletFromMnemonicWithPassphrase(mnemonic, "pass")  // with passph
 
 ### Building & Signing
 - `Complete() (*Apollo, error)`
+- `CompleteContext(ctx) (*Apollo, error)`
 - `Sign() (*Apollo, error)`
 - `SignWithSkey(skey) (*Apollo, error)`
 - `AddVerificationKeyWitness(witness) (*Apollo, error)`
 - `Submit() (Blake2b256, error)`
+- `SubmitContext(ctx) (Blake2b256, error)`
 - `GetTx() *ConwayTransaction`
 - `GetTxCbor() ([]byte, error)`
 - `LoadTxCbor(hex) (*Apollo, error)`

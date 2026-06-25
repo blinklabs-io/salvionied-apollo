@@ -63,13 +63,12 @@ The following SundaeSwap fork APIs exist in upstream master with the
 | `RedeemerTagNames` | Was `RdeemerTagNames` in old upstream |
 | `Address.AddressFromBytes(payment, paymentIsScript, staking, stakingIsScript, network)` | Script credential support |
 | `Address.IsPublicKeyAddress() bool` | |
-| `ChainContext.Utxos() ([]UTxO.UTxO, error)` | Error return |
-| `ChainContext.EvaluateTx() (map[...]..., error)` | Error return |
-| `ChainContext.EvaluateTxWithAdditionalUtxos(...)` | |
-| `ChainContext.CostModelsV1/V2/V3()` | |
 | `PlutusData.CostModel` type | |
 | `Transaction.Bytes()` uses `CanonicalEncOptions` | |
 | `TransactionOutput.GetScriptRef()` returns `nil` for pre-Alonzo | |
+
+`ChainContext` methods are context-aware in v2; see [Context-Aware
+ChainContext Methods](#37-context-aware-chaincontext-methods).
 
 ---
 
@@ -195,28 +194,32 @@ key files, upstream handles the conversion automatically. If you were
 relying on the fork's raw-passthrough behavior with pre-expanded 64-byte
 keys, you may need to adjust.
 
-### 3.7 Additional Error Returns on ChainContext Methods
+### 3.7 Context-Aware ChainContext Methods
 
 Apollo v2 uses the `backend.ChainContext` interface from `backend/base.go`.
 Custom implementations must use these method names and signatures:
 
 ```go
-ProtocolParams() (backend.ProtocolParameters, error)
-GenesisParams() (backend.GenesisParameters, error)
+ProtocolParams(ctx context.Context) (backend.ProtocolParameters, error)
+GenesisParams(ctx context.Context) (backend.GenesisParameters, error)
 NetworkId() uint8
-CurrentEpoch() (uint64, error)
-MaxTxFee() (uint64, error)
-Tip() (uint64, error)
-Utxos(address common.Address) ([]common.Utxo, error)
-SubmitTx(txCbor []byte) (common.Blake2b256, error)
-EvaluateTx(txCbor []byte) (map[common.RedeemerKey]common.ExUnits, error)
-UtxoByRef(txHash common.Blake2b256, index uint32) (*common.Utxo, error)
-ScriptCbor(scriptHash common.Blake2b224) ([]byte, error)
+CurrentEpoch(ctx context.Context) (uint64, error)
+MaxTxFee(ctx context.Context) (uint64, error)
+Tip(ctx context.Context) (uint64, error)
+Utxos(ctx context.Context, address common.Address) ([]common.Utxo, error)
+SubmitTx(ctx context.Context, txCbor []byte) (common.Blake2b256, error)
+EvaluateTx(ctx context.Context, txCbor []byte, additionalUtxos []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error)
+UtxoByRef(ctx context.Context, txHash common.Blake2b256, index uint32) (*common.Utxo, error)
+ScriptCbor(ctx context.Context, scriptHash common.Blake2b224) ([]byte, error)
 ```
 
 **Migration:** Rename old fork methods such as `GetProtocolParams`,
 `GetGenesisParams`, `Epoch`, `LastBlockSlot`, and `GetContractCbor` to the
-v2 interface above, and update integer return types where needed.
+v2 interface above, pass `context.Context` to backend calls, and update integer
+return types where needed. Apollo's `Complete()`, `Submit()`, and
+`UtxoFromRef(...)` remain context-free convenience wrappers; use
+`CompleteContext(ctx)`, `SubmitContext(ctx)`, and `UtxoFromRefContext(ctx, ...)`
+when cancellation or deadlines matter.
 
 ### 3.8 `ProtocolParameters.MinFeeReferenceScripts`
 
@@ -265,8 +268,9 @@ Run `go mod tidy` after switching imports.
    `AddReferenceInput(txHash, index).AddReferenceScriptV1/V2/V3()`
 3. **Update** `UtxoFromRef` / `GetUtxoFromRef` callers to expect
    `*UTxO.UTxO` instead of `UTxO.UTxO`
-4. **Update** any custom `ChainContext` implementations to match the
-   v2 `backend.ChainContext` interface (`ProtocolParams`, `GenesisParams`,
+4. **Update** any custom `ChainContext` implementations to accept
+   `context.Context` and match the v2 `backend.ChainContext` interface
+   (`ProtocolParams`, `GenesisParams`,
    `NetworkId`, `CurrentEpoch`, `MaxTxFee`, `Tip`, `Utxos`, `SubmitTx`,
    `EvaluateTx`, `UtxoByRef`, `ScriptCbor`)
 5. **Replace** `ScriptRef` struct usage with the new `[]byte`-based

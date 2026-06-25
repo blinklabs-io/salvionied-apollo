@@ -1,6 +1,7 @@
 package utxorpc
 
 import (
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -111,10 +112,11 @@ func bigIntToString(bi *cardano.BigInt) string {
 	}
 }
 
-func (u *UtxoRpcChainContext) ProtocolParams() (backend.ProtocolParameters, error) {
+func (u *UtxoRpcChainContext) ProtocolParams(ctx context.Context) (backend.ProtocolParameters, error) {
+	ctx = backend.ContextOrBackground(ctx)
 	req := connect.NewRequest(&query.ReadParamsRequest{})
 	u.client.AddHeadersToRequest(req)
-	resp, err := u.client.ReadParams(req)
+	resp, err := u.client.ReadParamsWithContext(ctx, req)
 	if err != nil {
 		return backend.ProtocolParameters{}, err
 	}
@@ -202,7 +204,10 @@ func (u *UtxoRpcChainContext) ProtocolParams() (backend.ProtocolParameters, erro
 	return pp, nil
 }
 
-func (u *UtxoRpcChainContext) GenesisParams() (backend.GenesisParameters, error) {
+func (u *UtxoRpcChainContext) GenesisParams(ctx context.Context) (backend.GenesisParameters, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return backend.GenesisParameters{}, err
+	}
 	return backend.GenesisParameters{}, errors.New("genesis params not available via UTxO RPC")
 }
 
@@ -210,22 +215,27 @@ func (u *UtxoRpcChainContext) NetworkId() uint8 {
 	return u.networkId
 }
 
-func (u *UtxoRpcChainContext) CurrentEpoch() (uint64, error) {
+func (u *UtxoRpcChainContext) CurrentEpoch(ctx context.Context) (uint64, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return 0, err
+	}
 	return 0, errors.New("epoch query not available via UTxO RPC")
 }
 
-func (u *UtxoRpcChainContext) MaxTxFee() (uint64, error) {
-	pp, err := u.ProtocolParams()
+func (u *UtxoRpcChainContext) MaxTxFee(ctx context.Context) (uint64, error) {
+	ctx = backend.ContextOrBackground(ctx)
+	pp, err := u.ProtocolParams(ctx)
 	if err != nil {
 		return 0, err
 	}
 	return backend.ComputeMaxTxFee(pp)
 }
 
-func (u *UtxoRpcChainContext) Tip() (uint64, error) {
+func (u *UtxoRpcChainContext) Tip(ctx context.Context) (uint64, error) {
+	ctx = backend.ContextOrBackground(ctx)
 	req := connect.NewRequest(&syncpb.ReadTipRequest{})
 	u.client.AddHeadersToRequest(req)
-	resp, err := u.client.ReadTip(req)
+	resp, err := u.client.ReadTipWithContext(ctx, req)
 	if err != nil {
 		return 0, err
 	}
@@ -236,7 +246,8 @@ func (u *UtxoRpcChainContext) Tip() (uint64, error) {
 	return tip.GetSlot(), nil
 }
 
-func (u *UtxoRpcChainContext) Utxos(address common.Address) ([]common.Utxo, error) {
+func (u *UtxoRpcChainContext) Utxos(ctx context.Context, address common.Address) ([]common.Utxo, error) {
+	ctx = backend.ContextOrBackground(ctx)
 	addrBytes, err := address.Bytes()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get address bytes: %w", err)
@@ -256,7 +267,7 @@ func (u *UtxoRpcChainContext) Utxos(address common.Address) ([]common.Utxo, erro
 		},
 	})
 	u.client.AddHeadersToRequest(req)
-	resp, err := u.client.SearchUtxos(req)
+	resp, err := u.client.SearchUtxosWithContext(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -272,14 +283,15 @@ func (u *UtxoRpcChainContext) Utxos(address common.Address) ([]common.Utxo, erro
 	return utxos, nil
 }
 
-func (u *UtxoRpcChainContext) SubmitTx(txCbor []byte) (common.Blake2b256, error) {
+func (u *UtxoRpcChainContext) SubmitTx(ctx context.Context, txCbor []byte) (common.Blake2b256, error) {
+	ctx = backend.ContextOrBackground(ctx)
 	req := connect.NewRequest(&submit.SubmitTxRequest{
 		Tx: &submit.AnyChainTx{
 			Type: &submit.AnyChainTx_Raw{Raw: txCbor},
 		},
 	})
 	u.client.AddHeadersToRequest(req)
-	resp, err := u.client.SubmitTx(req)
+	resp, err := u.client.SubmitTxWithContext(ctx, req)
 	if err != nil {
 		return common.Blake2b256{}, err
 	}
@@ -302,14 +314,15 @@ func (u *UtxoRpcChainContext) SubmitTx(txCbor []byte) (common.Blake2b256, error)
 // are already visible on-chain to the provider and does NOT support evaluating
 // off-chain or chained inputs. Passing a non-empty additionalUtxos is not an
 // error, but those UTxOs have no effect.
-func (u *UtxoRpcChainContext) EvaluateTx(txCbor []byte, _ []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error) {
+func (u *UtxoRpcChainContext) EvaluateTx(ctx context.Context, txCbor []byte, _ []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error) {
+	ctx = backend.ContextOrBackground(ctx)
 	req := connect.NewRequest(&submit.EvalTxRequest{
 		Tx: &submit.AnyChainTx{
 			Type: &submit.AnyChainTx_Raw{Raw: txCbor},
 		},
 	})
 	u.client.AddHeadersToRequest(req)
-	resp, err := u.client.EvalTx(req)
+	resp, err := u.client.EvalTxWithContext(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -362,7 +375,8 @@ func evalTxResponseToExUnits(msg *submit.EvalTxResponse) (map[common.RedeemerKey
 	return result, nil
 }
 
-func (u *UtxoRpcChainContext) UtxoByRef(txHash common.Blake2b256, index uint32) (*common.Utxo, error) {
+func (u *UtxoRpcChainContext) UtxoByRef(ctx context.Context, txHash common.Blake2b256, index uint32) (*common.Utxo, error) {
+	ctx = backend.ContextOrBackground(ctx)
 	req := connect.NewRequest(&query.ReadUtxosRequest{
 		Keys: []*query.TxoRef{
 			{
@@ -372,7 +386,7 @@ func (u *UtxoRpcChainContext) UtxoByRef(txHash common.Blake2b256, index uint32) 
 		},
 	})
 	u.client.AddHeadersToRequest(req)
-	resp, err := u.client.ReadUtxos(req)
+	resp, err := u.client.ReadUtxosWithContext(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -387,7 +401,10 @@ func (u *UtxoRpcChainContext) UtxoByRef(txHash common.Blake2b256, index uint32) 
 	return &utxo, nil
 }
 
-func (u *UtxoRpcChainContext) ScriptCbor(_ common.Blake2b224) ([]byte, error) {
+func (u *UtxoRpcChainContext) ScriptCbor(ctx context.Context, _ common.Blake2b224) ([]byte, error) {
+	if err := backend.ContextOrBackground(ctx).Err(); err != nil {
+		return nil, err
+	}
 	return nil, errors.New("script lookup not available via UTxO RPC")
 }
 

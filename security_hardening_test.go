@@ -1,6 +1,7 @@
 package apollo
 
 import (
+	"context"
 	"crypto/ed25519"
 	"fmt"
 	"math"
@@ -288,7 +289,7 @@ type fakeEvalContext struct {
 	result map[common.RedeemerKey]common.ExUnits
 }
 
-func (f *fakeEvalContext) EvaluateTx(_ []byte, _ []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error) {
+func (f *fakeEvalContext) EvaluateTx(_ context.Context, _ []byte, _ []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error) {
 	return f.result, nil
 }
 

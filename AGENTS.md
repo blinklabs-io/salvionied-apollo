@@ -64,10 +64,10 @@ golangci-lint run
 
 **ChainContext** (`backend/base.go`):
 
-- `ProtocolParams()` - protocol parameters
-- `Utxos(address)` - query UTxOs
-- `SubmitTx(txCbor)` - submit a transaction
-- `EvaluateTx(txCbor)` - evaluate Plutus scripts
+- `ProtocolParams(ctx)` - protocol parameters
+- `Utxos(ctx, address)` - query UTxOs
+- `SubmitTx(ctx, txCbor)` - submit a transaction
+- `EvaluateTx(ctx, txCbor, additionalUtxos)` - evaluate Plutus scripts
 
 **Wallet** (`wallet.go`):
 

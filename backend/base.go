@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math"
@@ -14,14 +15,14 @@ import (
 
 // ChainContext provides an interface for interacting with a Cardano blockchain.
 type ChainContext interface {
-	ProtocolParams() (ProtocolParameters, error)
-	GenesisParams() (GenesisParameters, error)
+	ProtocolParams(ctx context.Context) (ProtocolParameters, error)
+	GenesisParams(ctx context.Context) (GenesisParameters, error)
 	NetworkId() uint8
-	CurrentEpoch() (uint64, error)
-	MaxTxFee() (uint64, error)
-	Tip() (uint64, error)
-	Utxos(address common.Address) ([]common.Utxo, error)
-	SubmitTx(txCbor []byte) (common.Blake2b256, error)
+	CurrentEpoch(ctx context.Context) (uint64, error)
+	MaxTxFee(ctx context.Context) (uint64, error)
+	Tip(ctx context.Context) (uint64, error)
+	Utxos(ctx context.Context, address common.Address) ([]common.Utxo, error)
+	SubmitTx(ctx context.Context, txCbor []byte) (common.Blake2b256, error)
 	// EvaluateTx evaluates the scripts in a transaction and returns the
 	// execution units required by each redeemer. additionalUtxos is a set of
 	// resolved UTxOs supplied to the evaluator (e.g. spending inputs that are
@@ -33,9 +34,17 @@ type ChainContext interface {
 	// NOT support evaluation of off-chain or chained inputs. Passing non-empty
 	// additionalUtxos to such a backend is not an error, but those UTxOs will
 	// not be considered.
-	EvaluateTx(txCbor []byte, additionalUtxos []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error)
-	UtxoByRef(txHash common.Blake2b256, index uint32) (*common.Utxo, error)
-	ScriptCbor(scriptHash common.Blake2b224) ([]byte, error)
+	EvaluateTx(ctx context.Context, txCbor []byte, additionalUtxos []common.Utxo) (map[common.RedeemerKey]common.ExUnits, error)
+	UtxoByRef(ctx context.Context, txHash common.Blake2b256, index uint32) (*common.Utxo, error)
+	ScriptCbor(ctx context.Context, scriptHash common.Blake2b224) ([]byte, error)
+}
+
+// ContextOrBackground returns context.Background when ctx is nil.
+func ContextOrBackground(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return ctx
 }
 
 // GenesisParameters holds Cardano genesis configuration values.
