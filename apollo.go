@@ -38,6 +38,7 @@ type Apollo struct {
 	preselectedUtxos   []common.Utxo
 	inputAddresses     []common.Address
 	tx                 *conway.ConwayTransaction
+	buildReport        *BuildReport
 	datums             []common.Datum
 	requiredSigners    []common.Blake2b224
 	v1scripts          []common.PlutusV1Script
@@ -936,6 +937,7 @@ func (a *Apollo) LoadTxCbor(txCbor string) (*Apollo, error) {
 		return a, fmt.Errorf("failed to decode transaction: %w", err)
 	}
 	a.tx = &tx
+	a.buildReport = nil
 	return a, nil
 }
 
@@ -1029,6 +1031,9 @@ func (a *Apollo) Clone() *Apollo {
 			}
 		}
 	}
+	if a.buildReport != nil {
+		clone.buildReport = a.buildReport.clone()
+	}
 	return clone
 }
 
@@ -1072,6 +1077,17 @@ func (a *Apollo) GetWallet() Wallet {
 	return a.wallet
 }
 
+// Explain returns a diagnostic report for the transaction built by Complete.
+func (a *Apollo) Explain() (*BuildReport, error) {
+	if a.tx == nil {
+		return nil, errors.New("transaction not built - call Complete() first")
+	}
+	if a.buildReport == nil {
+		return nil, errors.New("no build report available for this transaction")
+	}
+	return a.buildReport.clone(), nil
+}
+
 // Complete performs coin selection, fee estimation, and builds the transaction.
 func (a *Apollo) Complete() (*Apollo, error) {
 	return a.CompleteContext(context.Background())
@@ -1089,10 +1105,21 @@ func (a *Apollo) CompleteContext(ctx context.Context) (*Apollo, error) {
 	if a.wallet == nil {
 		return a, errors.New("wallet is required to complete transaction")
 	}
+	a.buildReport = nil
 
 	// Load UTxOs from input addresses if needed (must happen before collateral selection)
 	if err := a.loadUtxos(ctx); err != nil {
 		return a, err
+	}
+
+	reportParams, err := a.Context.ProtocolParams(ctx)
+	if err != nil {
+		return a, fmt.Errorf("failed to get protocol params for build report: %w", err)
+	}
+	reportCoinsPerUtxoByte := reportParams.CoinsPerUtxoByteValue()
+	requestedOutputs, err := a.requestedOutputReports(reportCoinsPerUtxoByte)
+	if err != nil {
+		return a, fmt.Errorf("failed to build requested output report: %w", err)
 	}
 
 	// Auto-select collateral if needed (after UTxOs are loaded)
@@ -1264,6 +1291,10 @@ func (a *Apollo) CompleteContext(ctx context.Context) (*Apollo, error) {
 	const maxFeeIterations = 3
 	baseOutputs := make([]babbage.BabbageTransactionOutput, len(outputs))
 	copy(baseOutputs, outputs)
+	baseOutputReports, err := outputReportsFromTxOuts(baseOutputs, -1, reportCoinsPerUtxoByte, requestedOutputs)
+	if err != nil {
+		return a, fmt.Errorf("failed to build base output report: %w", err)
+	}
 
 	var fee int64
 	if a.forceFee {
@@ -1451,6 +1482,49 @@ func (a *Apollo) CompleteContext(ctx context.Context) (*Apollo, error) {
 		return a, err
 	}
 
+	changeOutputIndex := -1
+	if len(outputs) > len(baseOutputs) {
+		changeOutputIndex = len(baseOutputs)
+	}
+	finalOutputReports, err := outputReportsFromTxOuts(outputs, changeOutputIndex, reportCoinsPerUtxoByte, requestedOutputs)
+	if err != nil {
+		return a, fmt.Errorf("failed to build final output report: %w", err)
+	}
+	totalOutput, err := a.totalOutputValue(outputs)
+	if err != nil {
+		return a, err
+	}
+	refScriptSize, err := a.totalReferenceScriptSize(ctx, allInputUtxos)
+	if err != nil {
+		return a, err
+	}
+	refScriptFee, err := referenceScriptFeeForSize(refScriptSize, reportParams)
+	if err != nil {
+		return a, err
+	}
+	redeemerReports := a.redeemerReports(allInputUtxos)
+	executionUnits := totalRedeemerExUnits(redeemerReports)
+	executionUnitFee, err := executionUnitFee(reportParams, executionUnits)
+	if err != nil {
+		return a, err
+	}
+	mintValue, err := a.mintValue()
+	if err != nil {
+		return a, err
+	}
+	burnValue, err := a.burnRequirementValue()
+	if err != nil {
+		return a, err
+	}
+	requiredCollateral, err := collateralRequired(fee, reportParams.CollateralPercent)
+	if err != nil {
+		return a, err
+	}
+	collateralReturnReport, err := outputReportPtr(a.collateralReturn, 0, false, reportCoinsPerUtxoByte)
+	if err != nil {
+		return a, fmt.Errorf("failed to build collateral return report: %w", err)
+	}
+
 	// Build transaction body
 	body, err := a.buildBody(ctx, allInputUtxos, outputs, uint64(fee))
 	if err != nil {
@@ -1477,6 +1551,42 @@ func (a *Apollo) CompleteContext(ctx context.Context) (*Apollo, error) {
 			a.tx.TxMetadata = md
 		}
 	}
+
+	report, err := a.newBuildReport(buildReportSnapshot{
+		requestedOutputs:        requestedOutputs,
+		baseOutputReports:       baseOutputReports,
+		finalOutputReports:      finalOutputReports,
+		preselectedUtxos:        a.preselectedUtxos,
+		selectedUtxos:           selectedUtxos,
+		finalInputUtxos:         allInputUtxos,
+		selectionTarget:         selectionTarget,
+		totalInput:              totalInput,
+		totalRequired:           totalRequired,
+		governanceRequired:      governanceRequired,
+		refundValue:             refundValue,
+		stakeDeposit:            stakeDeposit,
+		preliminaryFee:          prelimFee,
+		refScriptFeeReserve:     refScriptFeeReserve,
+		refScriptSize:           refScriptSize,
+		refScriptFee:            refScriptFee,
+		executionUnits:          executionUnits,
+		executionUnitFee:        executionUnitFee,
+		feeSizeComponent:        feeSizeComponent(fee, a.FeePadding, refScriptFee, executionUnitFee),
+		finalFee:                fee,
+		collateralRequired:      requiredCollateral,
+		collateralReturn:        collateralReturnReport,
+		redeemers:               redeemerReports,
+		mintValue:               mintValue,
+		burnValue:               burnValue,
+		totalOutput:             totalOutput,
+		collateralAutoSelected:  a.collateralAutoSelected,
+		collateralOverlapRef:    a.collateralOverlapRef,
+		changeOutputIndexOffset: len(baseOutputs),
+	})
+	if err != nil {
+		return a, fmt.Errorf("failed to build transaction report: %w", err)
+	}
+	a.buildReport = report
 
 	return a, nil
 }

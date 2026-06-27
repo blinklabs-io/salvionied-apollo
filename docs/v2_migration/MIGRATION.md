@@ -481,5 +481,6 @@ a, err = a.SetWalletFromMnemonicWithPassphrase(mnemonic, "pass")  // with passph
 - `SubmitContext(ctx) (Blake2b256, error)`
 - `GetTx() *ConwayTransaction`
 - `GetTxCbor() ([]byte, error)`
+- `Explain() (*BuildReport, error)`
 - `LoadTxCbor(hex) (*Apollo, error)`
 - `Clone() *Apollo`
