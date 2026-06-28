@@ -8,5 +8,6 @@ Documentation for the Apollo transaction building library for Cardano.
 - **[Data Attachment](data_attachment/README.md)** — Attaching Plutus datums (hash and inline) and reference scripts to transaction outputs; CLI parity for datum and reference script flags.
 - **[Staking Functionalities](staking_functionalities/README.md)** — Stake key registration and deregistration, pool and vote (DRep) delegation, combined certificates, and reward withdrawals; CLI parity for stake-address and withdrawal flags.
 - **[Conway Governance](conway_governance/README.md)** — DRep registration/retirement/update, constitutional committee key authorization and resignation, casting votes, submitting governance action proposals, and treasury donations; CLI parity for `conway governance` commands and CIP-1694.
+- **[Build Reports](build_report.md)** — Using `Explain()` after `CompleteContext` to inspect selected inputs, outputs, change, fees, collateral, balance components, and redeemer mappings.
 
 All sections reference **cardano-cli** 10.14.0.0 where applicable. API details and examples are based on the Apollo codebase (see [AGENTS.md](../AGENTS.md) for build and test commands).
