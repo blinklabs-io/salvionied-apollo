@@ -1,6 +1,7 @@
 package apollo
 
 import (
+	"errors"
 	"math/big"
 	"strings"
 	"testing"
@@ -173,9 +174,29 @@ func TestLargestFirstSelectorConformance(t *testing.T) {
 	runSelectorConformance(t, func() CoinSelector { return &LargestFirstSelector{} })
 }
 
+func TestRandomImproveSelectorConformance(t *testing.T) {
+	runSelectorConformance(t, func() CoinSelector { return NewRandomImproveSelector() })
+}
+
+func TestRandomImproveThenLargestFirstSelectorConformance(t *testing.T) {
+	runSelectorConformance(t, func() CoinSelector { return NewRandomImproveThenLargestFirstSelector() })
+}
+
 func TestLargestFirstSelectorName(t *testing.T) {
 	if name := (&LargestFirstSelector{}).Name(); name != "largest-first" {
 		t.Errorf("expected name largest-first, got %q", name)
+	}
+}
+
+func TestRandomImproveSelectorName(t *testing.T) {
+	if name := NewRandomImproveSelector().Name(); name != "random-improve" {
+		t.Errorf("expected name random-improve, got %q", name)
+	}
+}
+
+func TestRandomImproveThenLargestFirstSelectorName(t *testing.T) {
+	if name := NewRandomImproveThenLargestFirstSelector().Name(); name != "random-improve-largest-first" {
+		t.Errorf("expected name random-improve-largest-first, got %q", name)
 	}
 }
 
@@ -202,6 +223,95 @@ func TestLargestFirstSelectorOrder(t *testing.T) {
 	}
 	if got := selected[1].Output.Amount().Uint64(); got != 5_000_000 {
 		t.Errorf("expected second selection of 5 ADA, got %d lovelace", got)
+	}
+}
+
+func TestRandomImproveSelectorImprovesTowardDoubleTarget(t *testing.T) {
+	pool := []common.Utxo{
+		makeSelectorUtxo(t, 0x01, 0, 10_000_000, nil),
+		makeSelectorUtxo(t, 0x02, 0, 5_000_000, nil),
+	}
+	selected, err := NewRandomImproveSelector().Select(pool, NewSimpleValue(10_000_000))
+	if err != nil {
+		t.Fatalf("Select failed: %v", err)
+	}
+	if len(selected) != 2 {
+		t.Fatalf("expected improvement to add second UTxO, got %d selections", len(selected))
+	}
+	if got := sumSelected(t, selected).Coin; got != 15_000_000 {
+		t.Errorf("expected improved total of 15 ADA, got %d lovelace", got)
+	}
+}
+
+func TestRandomImproveSelectorDoesNotImprovePastDoubleTarget(t *testing.T) {
+	pool := []common.Utxo{
+		makeSelectorUtxo(t, 0x01, 0, 10_000_000, nil),
+		makeSelectorUtxo(t, 0x02, 0, 11_000_000, nil),
+	}
+	selected, err := NewRandomImproveSelector().Select(pool, NewSimpleValue(10_000_000))
+	if err != nil {
+		t.Fatalf("Select failed: %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("expected improvement to skip overshooting UTxO, got %d selections", len(selected))
+	}
+	if got := sumSelected(t, selected).Coin; got > 20_000_000 {
+		t.Errorf("selection exceeded twice the target: %d lovelace", got)
+	}
+}
+
+func TestRandomImproveSelectorImprovesTargetAssets(t *testing.T) {
+	pool := []common.Utxo{
+		makeSelectorUtxo(t, 0x01, 0, 2_000_000, makeTestAssets(0xAA, "tokenA", 10)),
+		makeSelectorUtxo(t, 0x02, 0, 1_000_000, makeTestAssets(0xAA, "tokenA", 5)),
+	}
+	target := NewValue(2_000_000, makeTestAssets(0xAA, "tokenA", 10))
+	selected, err := NewRandomImproveSelector().Select(pool, target)
+	if err != nil {
+		t.Fatalf("Select failed: %v", err)
+	}
+	got := sumSelected(t, selected)
+	if got.Coin != 3_000_000 {
+		t.Fatalf("expected improved coin total of 3 ADA, got %d lovelace", got.Coin)
+	}
+	var policy common.Blake2b224
+	policy[0] = 0xAA
+	qty := got.Assets.Asset(policy, []byte("tokenA"))
+	if qty == nil || qty.Cmp(big.NewInt(15)) != 0 {
+		t.Fatalf("expected improved token total of 15, got %v", qty)
+	}
+}
+
+type alwaysFailSelector struct{}
+
+func (s alwaysFailSelector) Name() string { return "always-fail" }
+
+func (s alwaysFailSelector) Select([]common.Utxo, Value) ([]common.Utxo, error) {
+	return nil, errors.New("forced failure")
+}
+
+func TestRandomImproveThenLargestFirstSelectorFallsBack(t *testing.T) {
+	pool := []common.Utxo{
+		makeSelectorUtxo(t, 0x01, 0, 3_000_000, nil),
+		makeSelectorUtxo(t, 0x02, 0, 10_000_000, nil),
+		makeSelectorUtxo(t, 0x03, 0, 5_000_000, nil),
+	}
+	selector := &RandomImproveThenLargestFirstSelector{
+		RandomImprove: alwaysFailSelector{},
+		Fallback:      &LargestFirstSelector{},
+	}
+	selected, err := selector.Select(pool, NewSimpleValue(12_000_000))
+	if err != nil {
+		t.Fatalf("Select failed: %v", err)
+	}
+	if len(selected) != 2 {
+		t.Fatalf("expected 2 UTxOs selected by fallback, got %d", len(selected))
+	}
+	if got := selected[0].Output.Amount().Uint64(); got != 10_000_000 {
+		t.Errorf("expected fallback to select 10 ADA first, got %d lovelace", got)
+	}
+	if got := selected[1].Output.Amount().Uint64(); got != 5_000_000 {
+		t.Errorf("expected fallback to select 5 ADA second, got %d lovelace", got)
 	}
 }
 
