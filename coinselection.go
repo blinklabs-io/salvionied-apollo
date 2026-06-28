@@ -19,6 +19,8 @@ type CoinSelector interface {
 	Select(available []common.Utxo, target Value) ([]common.Utxo, error)
 }
 
+var errInsufficientUtxos = errors.New("insufficient UTxOs to cover required value")
+
 // defaultCoinSelector is used by Complete when no selector is configured.
 // MACS is the default: benchmarks (see docs/design/2026-06-11-macs-coin-
 // selection-design.md) show it selects far fewer inputs on multi-asset
@@ -88,5 +90,5 @@ func (s *LargestFirstSelector) Select(available []common.Utxo, target Value) ([]
 			return selected, nil
 		}
 	}
-	return nil, errors.New("insufficient UTxOs to cover required value")
+	return nil, errInsufficientUtxos
 }

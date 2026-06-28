@@ -66,7 +66,7 @@ func (s *RandomImproveSelector) Select(available []common.Utxo, target Value) ([
 		result = append(result, cand.utxo)
 	}
 	if !total.GreaterOrEqual(target) {
-		return nil, errors.New("insufficient UTxOs to cover required value")
+		return nil, errInsufficientUtxos
 	}
 
 	ideal, err := target.Add(target)
@@ -104,13 +104,13 @@ func (s *RandomImproveSelector) Select(available []common.Utxo, target Value) ([
 }
 
 // RandomImproveThenLargestFirstSelector follows the Cardano Wallet strategy
-// from CIP-0002: try Random-Improve first, then fall back to Largest-First if
-// Random-Improve cannot produce a valid selection.
+// from CIP-0002: try Random-Improve first, then fall back to Largest-First
+// only when Random-Improve cannot cover the target from the available pool.
 type RandomImproveThenLargestFirstSelector struct {
 	// RandomImprove is the primary selector. If nil, NewRandomImproveSelector
 	// is used.
 	RandomImprove CoinSelector
-	// Fallback is used when RandomImprove returns an error. If nil,
+	// Fallback is used when RandomImprove reports insufficient UTxOs. If nil,
 	// LargestFirstSelector is used.
 	Fallback CoinSelector
 }
@@ -135,6 +135,9 @@ func (s *RandomImproveThenLargestFirstSelector) Select(available []common.Utxo, 
 	selected, err := primary.Select(available, target)
 	if err == nil {
 		return selected, nil
+	}
+	if !errors.Is(err, errInsufficientUtxos) {
+		return nil, fmt.Errorf("%s failed: %w", primary.Name(), err)
 	}
 
 	fallback := s.Fallback

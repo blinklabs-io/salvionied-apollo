@@ -290,6 +290,14 @@ func (s alwaysFailSelector) Select([]common.Utxo, Value) ([]common.Utxo, error) 
 	return nil, errors.New("forced failure")
 }
 
+type alwaysInsufficientSelector struct{}
+
+func (s alwaysInsufficientSelector) Name() string { return "always-insufficient" }
+
+func (s alwaysInsufficientSelector) Select([]common.Utxo, Value) ([]common.Utxo, error) {
+	return nil, errInsufficientUtxos
+}
+
 func TestRandomImproveThenLargestFirstSelectorFallsBack(t *testing.T) {
 	pool := []common.Utxo{
 		makeSelectorUtxo(t, 0x01, 0, 3_000_000, nil),
@@ -297,7 +305,7 @@ func TestRandomImproveThenLargestFirstSelectorFallsBack(t *testing.T) {
 		makeSelectorUtxo(t, 0x03, 0, 5_000_000, nil),
 	}
 	selector := &RandomImproveThenLargestFirstSelector{
-		RandomImprove: alwaysFailSelector{},
+		RandomImprove: alwaysInsufficientSelector{},
 		Fallback:      &LargestFirstSelector{},
 	}
 	selected, err := selector.Select(pool, NewSimpleValue(12_000_000))
@@ -312,6 +320,72 @@ func TestRandomImproveThenLargestFirstSelectorFallsBack(t *testing.T) {
 	}
 	if got := selected[1].Output.Amount().Uint64(); got != 5_000_000 {
 		t.Errorf("expected fallback to select 5 ADA second, got %d lovelace", got)
+	}
+}
+
+func TestRandomImproveThenLargestFirstSelectorDoesNotFallbackOnPrimaryError(t *testing.T) {
+	pool := []common.Utxo{
+		makeSelectorUtxo(t, 0x01, 0, 10_000_000, nil),
+	}
+	fallback := &recordingSelector{inner: &LargestFirstSelector{}}
+	selector := &RandomImproveThenLargestFirstSelector{
+		RandomImprove: alwaysFailSelector{},
+		Fallback:      fallback,
+	}
+	_, err := selector.Select(pool, NewSimpleValue(1_000_000))
+	if err == nil {
+		t.Fatal("expected primary error")
+	}
+	if fallback.called {
+		t.Fatal("fallback should not run for non-selection primary errors")
+	}
+	if !strings.Contains(err.Error(), "forced failure") {
+		t.Fatalf("expected forced failure error, got: %v", err)
+	}
+}
+
+func TestRandomImproveThenLargestFirstSelectorDoesNotFallbackOnInvalidAmount(t *testing.T) {
+	good := makeSelectorUtxo(t, 0x01, 0, 10_000_000, nil)
+	badBase := makeSelectorUtxo(t, 0x02, 0, 1_000_000, nil)
+	tooBig := new(big.Int).Lsh(big.NewInt(1), 64)
+	bad := common.Utxo{Id: badBase.Id, Output: badAmountOutput{badBase.Output, tooBig}}
+	fallback := &recordingSelector{inner: &LargestFirstSelector{}}
+	selector := &RandomImproveThenLargestFirstSelector{
+		Fallback: fallback,
+	}
+
+	_, err := selector.Select([]common.Utxo{good, bad}, NewSimpleValue(1_000_000))
+	if err == nil {
+		t.Fatal("expected invalid amount error")
+	}
+	if fallback.called {
+		t.Fatal("fallback should not run for invalid backend amount errors")
+	}
+	if !strings.Contains(err.Error(), "invalid lovelace amount") {
+		t.Fatalf("expected invalid lovelace amount error, got: %v", err)
+	}
+}
+
+func TestRandomImproveThenLargestFirstSelectorDoesNotFallbackOnOverflow(t *testing.T) {
+	maxUint64 := ^uint64(0)
+	pool := []common.Utxo{
+		makeSelectorUtxo(t, 0x01, 0, maxUint64-1, nil),
+		makeSelectorUtxo(t, 0x02, 0, 2, nil),
+	}
+	fallback := &recordingSelector{inner: &LargestFirstSelector{}}
+	selector := &RandomImproveThenLargestFirstSelector{
+		Fallback: fallback,
+	}
+
+	_, err := selector.Select(pool, NewSimpleValue(maxUint64))
+	if err == nil {
+		t.Fatal("expected overflow error")
+	}
+	if fallback.called {
+		t.Fatal("fallback should not run for Random-Improve overflow errors")
+	}
+	if !strings.Contains(err.Error(), "overflow") {
+		t.Fatalf("expected overflow error, got: %v", err)
 	}
 }
 

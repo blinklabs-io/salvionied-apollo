@@ -2,7 +2,6 @@ package apollo
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -127,7 +126,7 @@ func (s *MACSSelector) Select(available []common.Utxo, target Value) ([]common.U
 		}
 		pick := macsBestCandidate(cands, selected, classes[clsIdx], avgs[clsIdx])
 		if pick == nil {
-			return nil, errors.New("insufficient UTxOs to cover required value")
+			return nil, errInsufficientUtxos
 		}
 		selected[pick.cand.ref] = true
 		picks = append(picks, pick)
