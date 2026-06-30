@@ -110,13 +110,17 @@ a := apollo.New(bfc)
 // Legacy largest-first behavior
 a = a.SetCoinSelector(&apollo.LargestFirstSelector{})
 
+// CIP-0002 Random-Improve, or Cardano Wallet-style fallback to Largest-First
+a = a.SetCoinSelector(apollo.NewRandomImproveSelector())
+a = a.SetCoinSelector(apollo.NewRandomImproveThenLargestFirstSelector())
+
 // MACS without dust sweeping, or with custom limits
 a = a.SetCoinSelector(&apollo.MACSSelector{})
 a = a.SetCoinSelector(&apollo.MACSSelector{DustThreshold: 2_000_000, MaxDustInputs: 4})
 ```
 
 Benchmarks live in `coinselection_bench_test.go`
-(`go test -bench BenchmarkCoinSelection`), and the design notes with full
+(`go test -bench BenchmarkCoinSelection`), and the MACS design notes with full
 results are in `docs/design/2026-06-11-macs-coin-selection-design.md`.
 
 If you have any questions or requests feel free to drop into this discord and ask :) https://discord.gg/MH4CmJcg49

@@ -155,7 +155,12 @@ func benchScenarios(tb testing.TB) []benchScenario {
 }
 
 func BenchmarkCoinSelection(b *testing.B) {
-	selectors := []CoinSelector{&LargestFirstSelector{}, &MACSSelector{}}
+	selectors := []CoinSelector{
+		&LargestFirstSelector{},
+		NewRandomImproveSelector(),
+		NewRandomImproveThenLargestFirstSelector(),
+		&MACSSelector{},
+	}
 	for _, sc := range benchScenarios(b) {
 		for _, sel := range selectors {
 			b.Run(sc.name+"/"+sel.Name(), func(b *testing.B) {
@@ -193,6 +198,8 @@ func TestCoinSelectionComparison(t *testing.T) {
 		sel   CoinSelector
 	}{
 		{"largest-first", &LargestFirstSelector{}},
+		{"random-improve", NewRandomImproveSelector()},
+		{"random-improve-largest-first", NewRandomImproveThenLargestFirstSelector()},
 		{"macs-pure", &MACSSelector{}},
 		{"macs-sweep", NewMACSSelector()},
 	}
